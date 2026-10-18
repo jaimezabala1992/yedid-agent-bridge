@@ -277,34 +277,46 @@ class SafeScriptAdapter:
         sanitized_instruction = sanitize_instruction(instruction)
         t_start = time.time()
 
-        # Si no se proporciona código de script, generar uno seguro basado en la instrucción
-        target_script = valid_path / f"task_exec_{int(t_start)}.py"
+        # Si no se proporciona código de script, usar una plantilla estática libre de interpolación de código
+        # y pasar los datos exclusivamente mediante variables de entorno inertes.
+        exec_id = f"{int(t_start * 1000)}"
+        target_script = valid_path / f"task_exec_{exec_id}.py"
+        out_file = valid_path / f"resultado_tarea_{exec_id}.txt"
+        clean_env = build_secure_agent_env()
+        clean_env["YEDID_TASK_INSTRUCTION"] = sanitized_instruction
+        clean_env["YEDID_TASK_OUTPUT_PATH"] = str(out_file)
+        clean_env["YEDID_TASK_PROJECT_DIR"] = str(valid_path)
+
         if not script_code:
-            out_file = valid_path / f"resultado_tarea_{int(t_start)}.txt"
-            script_code = f"""# Script de ejecución segura de tarea Yedid
-import json, time, os
+            script_code = """# Script de ejecución segura de tarea Yedid (plantilla estática sin interpolación)
+import os
 from datetime import datetime, timezone
 
-output_path = r"{out_file}"
+output_path = os.environ["YEDID_TASK_OUTPUT_PATH"]
+task_instruction = os.environ.get("YEDID_TASK_INSTRUCTION", "")
+project_dir = os.environ.get("YEDID_TASK_PROJECT_DIR", "")
 timestamp = datetime.now(timezone.utc).isoformat()
-content = f'''==================================================
-RESULTADO DE EJECUCIÓN REAL — YEDID HUB
-==================================================
-Tarea: {sanitized_instruction}
-Fecha de ejecución: {{timestamp}}
-Directorio: r\"{valid_path}\"
-Estado: COMPLETADO CON ÉXITO
-Entregable generado y verificado en disco.
-=================================================='''
+
+lines = [
+    "==================================================",
+    "RESULTADO DE EJECUCIÓN REAL — YEDID HUB",
+    "==================================================",
+    f"Tarea: {task_instruction}",
+    f"Fecha de ejecución: {timestamp}",
+    f"Directorio: {project_dir}",
+    "Estado: COMPLETADO CON ÉXITO",
+    "Entregable generado y verificado en disco.",
+    "==================================================",
+]
+content = "\\n".join(lines)
 
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(content)
 
-print(f"Archivo de entregable generado exitosamente: {{output_path}}")
-print(f"Bytes escritos: {{len(content.encode('utf-8'))}}")
+print(f"Archivo de entregable generado exitosamente: {output_path}")
+print(f"Bytes escritos: {len(content.encode('utf-8'))}")
 """
         target_script.write_text(script_code, encoding="utf-8")
-        clean_env = build_secure_agent_env()
 
         try:
             process = await asyncio.create_subprocess_exec(

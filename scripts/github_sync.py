@@ -91,14 +91,18 @@ def run_security_audit(root: Path = REPO_ROOT) -> Tuple[bool, List[str], List[Di
     return (len(violations) == 0), violations, manifest
 
 
-def init_and_commit_local_git(root: Path = REPO_ROOT, message: str = "chore: initial sanitized Yedid Smart Hub v2.0 repository for Gemini & ChatGPT collaboration") -> str:
-    """Inicializa el repositorio Git local en la rama 'main', configura 'origin' y crea el commit."""
+def init_and_commit_local_git(
+    root: Path = REPO_ROOT,
+    message: str = "chore: initial sanitized Yedid Smart Hub v2.0 repository for Gemini & ChatGPT collaboration",
+    branch: str = DEFAULT_BRANCH,
+) -> str:
+    """Inicializa o actualiza el repositorio Git local en la rama indicada, configura 'origin' y crea el commit."""
     from dulwich.repo import Repo
     from dulwich import porcelain
 
     git_dir = root / ".git"
     if not git_dir.exists():
-        repo = Repo.init(str(root), default_branch=b"main")
+        repo = Repo.init(str(root), default_branch=branch.encode("utf-8"))
     else:
         repo = Repo(str(root))
 
@@ -108,6 +112,11 @@ def init_and_commit_local_git(root: Path = REPO_ROOT, message: str = "chore: ini
     config.set((b"user",), b"name", b"Jaime Zabala (Yedid Smart Hub)")
     config.set((b"user",), b"email", b"jaimezabala1992@users.noreply.github.com")
     config.write_to_path()
+
+    branch_ref = f"refs/heads/{branch}".encode("utf-8")
+    if branch_ref not in repo.refs and b"refs/heads/main" in repo.refs:
+        repo.refs[branch_ref] = repo.refs[b"refs/heads/main"]
+    repo.refs.set_symbolic_ref(b"HEAD", branch_ref)
 
     rel_paths = [str(f.relative_to(root)) for f in collect_repo_files(root)]
     porcelain.add(repo, paths=[str(root / rp) for rp in rel_paths])
@@ -119,16 +128,19 @@ def init_and_commit_local_git(root: Path = REPO_ROOT, message: str = "chore: ini
         committer=b"Gemini Antigravity <gemini-antigravity@users.noreply.github.com>",
     )
     commit_sha = commit_bytes.decode("ascii")
-    # Asegurar que refs/heads/main y HEAD apunten a main
-    repo.refs[b"refs/heads/main"] = commit_bytes
-    repo.refs.set_symbolic_ref(b"HEAD", b"refs/heads/main")
+    repo.refs[branch_ref] = commit_bytes
+    repo.refs.set_symbolic_ref(b"HEAD", branch_ref)
     repo.close()
     return commit_sha
 
 
-def push_to_github_api(root: Path = REPO_ROOT, commit_message: str = "Sync sanitized Yedid Smart Hub v2.0") -> Dict[str, str]:
+def push_to_github_api(
+    root: Path = REPO_ROOT,
+    commit_message: str = "Sync sanitized Yedid Smart Hub v2.0",
+    branch: str = DEFAULT_BRANCH,
+) -> Dict[str, str]:
     """
-    Publica el árbol auditado hacia https://github.com/jaimezabala1992/yedid-agent-bridge (rama main)
+    Publica el árbol auditado hacia https://github.com/jaimezabala1992/yedid-agent-bridge en la rama indicada
     utilizando el token de GitHub almacenado en Windows Credential Manager o GITHUB_TOKEN.
     """
     import httpx
@@ -159,28 +171,28 @@ def push_to_github_api(root: Path = REPO_ROOT, commit_message: str = "Sync sanit
     api_base = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
 
     with httpx.Client(timeout=45.0, headers=headers) as client:
-        # Verificar si el repositorio está completamente vacío (size == 0)
-        repo_res = client.get(api_base)
-        repo_res.raise_for_status()
-        repo_info = repo_res.json()
+        # Comprobar si la rama destino existe; si no existe, partir del SHA actual de DEFAULT_BRANCH (main)
+        ref_res = client.get(f"{api_base}/git/ref/heads/{branch}")
+        branch_exists = ref_res.status_code == 200
 
-        # Si el repositorio está vacío, la API Git Data requiere inicializar el primer archivo vía Contents API
-        ref_res = client.get(f"{api_base}/git/ref/heads/{DEFAULT_BRANCH}")
-        if ref_res.status_code in (404, 409):
-            readme_bytes = (root / "README.md").read_bytes()
-            init_res = client.put(
-                f"{api_base}/contents/README.md",
-                json={
-                    "message": "chore: initialize main branch",
-                    "content": base64.b64encode(readme_bytes).decode("ascii"),
-                    "branch": DEFAULT_BRANCH,
-                },
-            )
-            init_res.raise_for_status()
-            ref_res = client.get(f"{api_base}/git/ref/heads/{DEFAULT_BRANCH}")
-
-        ref_res.raise_for_status()
-        parent_sha = ref_res.json()["object"]["sha"]
+        if not branch_exists:
+            main_ref_res = client.get(f"{api_base}/git/ref/heads/{DEFAULT_BRANCH}")
+            if main_ref_res.status_code in (404, 409):
+                readme_bytes = (root / "README.md").read_bytes()
+                init_res = client.put(
+                    f"{api_base}/contents/README.md",
+                    json={
+                        "message": "chore: initialize main branch",
+                        "content": base64.b64encode(readme_bytes).decode("ascii"),
+                        "branch": DEFAULT_BRANCH,
+                    },
+                )
+                init_res.raise_for_status()
+                main_ref_res = client.get(f"{api_base}/git/ref/heads/{DEFAULT_BRANCH}")
+            main_ref_res.raise_for_status()
+            parent_sha = main_ref_res.json()["object"]["sha"]
+        else:
+            parent_sha = ref_res.json()["object"]["sha"]
 
         # Crear blobs y entradas del árbol Git para todos los archivos auditados
         tree_entries = []
@@ -218,27 +230,37 @@ def push_to_github_api(root: Path = REPO_ROOT, commit_message: str = "Sync sanit
         commit_res.raise_for_status()
         new_commit_sha = commit_res.json()["sha"]
 
-        update_ref_res = client.patch(
-            f"{api_base}/git/refs/heads/{DEFAULT_BRANCH}",
-            json={"sha": new_commit_sha, "force": False},
-        )
-        update_ref_res.raise_for_status()
+        if branch_exists:
+            update_ref_res = client.patch(
+                f"{api_base}/git/refs/heads/{branch}",
+                json={"sha": new_commit_sha, "force": False},
+            )
+            update_ref_res.raise_for_status()
+        else:
+            create_ref_res = client.post(
+                f"{api_base}/git/refs",
+                json={"ref": f"refs/heads/{branch}", "sha": new_commit_sha},
+            )
+            create_ref_res.raise_for_status()
 
         return {
             "status": "pushed",
             "repository": f"{GITHUB_OWNER}/{GITHUB_REPO}",
-            "branch": DEFAULT_BRANCH,
+            "branch": branch,
+            "parent_sha": parent_sha,
             "commit_sha": new_commit_sha,
             "files_published": str(len(tree_entries)),
+            "compare_url": f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/compare/{DEFAULT_BRANCH}...{branch}",
         }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Auditoría y Sincronización Segura con GitHub para Yedid Smart Hub")
     parser.add_argument("--audit", action="store_true", help="Ejecuta la auditoría de seguridad y sintaxis sobre todos los archivos")
-    parser.add_argument("--init-commit", action="store_true", help="Inicializa el repositorio Git local en la rama main y crea el commit inicial")
+    parser.add_argument("--init-commit", action="store_true", help="Registra el commit en el repositorio Git local")
     parser.add_argument("--set-token", metavar="TOKEN", help="Guarda el Personal Access Token de GitHub en Windows Credential Manager")
-    parser.add_argument("--push", action="store_true", help="Publica los archivos auditados hacia GitHub (requiere autorización)")
+    parser.add_argument("--push", action="store_true", help="Publica los archivos auditados hacia GitHub")
+    parser.add_argument("-b", "--branch", default=DEFAULT_BRANCH, help="Rama de destino en Git local y GitHub (por defecto: main)")
     parser.add_argument("-m", "--message", default="feat: Yedid Smart Hub v2.0 sanitized repository for Gemini & ChatGPT collaboration", help="Mensaje del commit")
     args = parser.parse_args()
 
@@ -262,14 +284,14 @@ def main():
         print("  ✅ 0 secretos, 0 bases de datos SQLite, 0 certificados, 0 correos/IPs privadas, 100% AST Python válido.")
 
     if args.init_commit:
-        sha = init_and_commit_local_git(REPO_ROOT, message=args.message)
-        print(f"  ✅ Repositorio Git inicializado en rama '{DEFAULT_BRANCH}' (Remote: {REMOTE_URL})")
-        print(f"  ✅ Commit local creado: {sha}")
+        sha = init_and_commit_local_git(REPO_ROOT, message=args.message, branch=args.branch)
+        print(f"  ✅ Commit Git local registrado en rama '{args.branch}' (Remote: {REMOTE_URL}): {sha}")
 
     if args.push:
-        res = push_to_github_api(REPO_ROOT, commit_message=args.message)
+        res = push_to_github_api(REPO_ROOT, commit_message=args.message, branch=args.branch)
         print(f"  🚀 Push completado exitosamente: {json.dumps(res, ensure_ascii=False)}")
 
 
 if __name__ == "__main__":
     main()
+

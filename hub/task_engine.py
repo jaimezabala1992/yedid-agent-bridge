@@ -497,12 +497,17 @@ class TaskEngine:
                     status = 'failed',
                     finished_at = ?,
                     error = ?
-                WHERE id = ?;
+                WHERE id = ? AND status != 'cancelled';
             """, (now, error_message, task_id))
             conn.commit()
 
+    def _is_task_cancelled(self, task_id: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT status FROM tasks WHERE id = ?;", (task_id,)).fetchone()
+            return bool(row and row["status"] == "cancelled")
+
     async def _execute_task_pipeline(self, task: Dict[str, Any]) -> None:
-        """Ejecuta una tarea de manera supervisada, validando tokens de aprobación de alcance único."""
+        """Ejecuta una tarea de manera supervisada, validando tokens de aprobación de alcance único y evitando condiciones de carrera con cancel_task."""
         task_id = task["id"]
         agent = task["agent"]
         instruction = task["instruction"]
@@ -512,6 +517,10 @@ class TaskEngine:
 
         logger.info(f"[TASK ENGINE] Iniciando ejecución de tarea {task_id} (Agente: {agent}, Riesgo: {risk_level})...")
         t_start = time.time()
+
+        if self._is_task_cancelled(task_id):
+            logger.info(f"[TASK ENGINE] Tarea {task_id} ya se encuentra cancelada antes de iniciar pipeline. Abortando.")
+            return
 
         # Si es de alto riesgo, verificar exhaustivamente el token de aprobación humana
         if risk_level == "HIGH":
@@ -541,15 +550,25 @@ class TaskEngine:
                 self._record_task_failure(task_id, err)
                 return
 
+        # Transición atómica (Compare-And-Set): solo pasa a 'running' si sigue en 'queued'
         with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE tasks SET status = 'running', started_at = ? WHERE id = ?;",
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued';",
                 (t_start, task_id)
             )
             conn.commit()
+            if cur.rowcount == 0:
+                logger.info(f"[TASK ENGINE] Tarea {task_id} ya no está en estado 'queued' (posiblemente cancelada). Abortando ejecución.")
+                return
 
         def on_proc_started(pid: int):
             process_guard.attach_process(task_id, pid)
+            # Si fue cancelada justo en la ventana de arranque del subproceso, terminar de inmediato
+            if self._is_task_cancelled(task_id):
+                try:
+                    process_guard.terminate_task(task_id)
+                except Exception:
+                    pass
 
         exec_res: Dict[str, Any] = {}
         try:
@@ -591,7 +610,7 @@ class TaskEngine:
         t_finish = time.time()
         duration = round(t_finish - t_start, 2)
         success = exec_res.get("success", False)
-        new_status = "completed" if success else "failed"
+        candidate_status = "completed" if success else "failed"
         stdout_txt = exec_res.get("stdout", "")
         stderr_txt = exec_res.get("stderr", "")
         exit_code = exec_res.get("returncode", 0 if success else -1)
@@ -599,7 +618,8 @@ class TaskEngine:
         error_msg = exec_res.get("error") or (stderr_txt if not success else None)
 
         with self._get_conn() as conn:
-            conn.execute("""
+            # Actualizar únicamente si NO fue cancelada durante la ejecución
+            cur = conn.execute("""
                 UPDATE tasks SET
                     status = ?,
                     finished_at = ?,
@@ -609,17 +629,36 @@ class TaskEngine:
                     stderr = ?,
                     deliverables = ?,
                     error = ?
-                WHERE id = ?;
+                WHERE id = ? AND status != 'cancelled';
             """, (
-                new_status, t_finish, duration, exit_code,
+                candidate_status, t_finish, duration, exit_code,
                 stdout_txt, stderr_txt, json.dumps(deliverables, ensure_ascii=False),
                 error_msg, task_id
             ))
+            if cur.rowcount == 0:
+                # La tarea fue cancelada mientras corría: preservar status='cancelled' y registrar telemetría final
+                new_status = "cancelled"
+                conn.execute("""
+                    UPDATE tasks SET
+                        finished_at = COALESCE(finished_at, ?),
+                        duration_seconds = ?,
+                        exit_code = ?,
+                        stdout = ?,
+                        stderr = ?,
+                        deliverables = ?
+                    WHERE id = ? AND status = 'cancelled';
+                """, (
+                    t_finish, duration, exit_code,
+                    stdout_txt, stderr_txt, json.dumps(deliverables, ensure_ascii=False),
+                    task_id
+                ))
+            else:
+                new_status = candidate_status
             conn.commit()
 
         logger.info(f"[TASK ENGINE] Tarea {task_id} finalizada con estado '{new_status}' en {duration}s. Entregables: {len(deliverables)}.")
 
-        if conv_id:
+        if conv_id and new_status != "cancelled":
             try:
                 deliverables_summary = ""
                 if deliverables:

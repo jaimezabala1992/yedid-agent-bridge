@@ -59,7 +59,39 @@ Se diagnosticaron y resolvieron 5 aspectos observados durante pruebas desde el *
 
 ---
 
-## 3. Problemas Conocidos / Limitaciones Actuales
+## 3. Auditoría Técnica y Corrección de los 6 Hallazgos de ChatGPT (Yedid) — Rama `fix/chatgpt-audit-6-findings`
+
+Tras la primera revisión arquitectónica de **ChatGPT (Yedid)** sobre `jaimezabala1992/yedid-agent-bridge`, se auditaron los 6 puntos reportados en un entorno aislado con bases de datos temporales (`tests/test_chatgpt_audit_fixes.py`), confirmando que **los 6 correspondían a defectos reales** y aplicando sus correcciones:
+
+1. **Consultas SQL parametrizadas sin `os.getenv()` literal (`hub/chat_history_db.py`):**
+   - **Causa:** El sanitizador inicial reemplazó el correo del propietario dentro de cadenas SQL triples por `os.getenv('YEDID_OWNER_EMAIL', ...)`, provocando que SQLite intentara evaluar `os.getenv` como función SQL en `list_conversations()`, `get_conversation()` y `delete_conversation()`.
+   - **Corrección:** Se introdujo `ChatHistoryDB._owner_email()` en Python y se vinculó como parámetro SQL `?` (`c.user IN ('jaime', ?, 'api_client')`).
+
+2. **Neutralización de inyección HTML/JavaScript (XSS) en la PWA (`hub/static/index.html`):**
+   - **Causa:** `formatChatTextHtml()` omitía el escapado HTML si el texto contenía `<div` o `<strong`, permitiendo vectores como `<div onmouseover=...>` o `<strong onclick=...>`. Además, `renderTaskCardHtml()`, `renderApprovalsModal()` y `appendMessage()` interpolaban campos dinámicos directamente en `innerHTML`.
+   - **Corrección:** Se implementó `escapeHtml(val)` y se eliminó la exención condicional en `formatChatTextHtml()`, escapando siempre de forma incondicional antes de aplicar las reglas Markdown seguras (`**negrita**`, `` `código` ``, saltos de línea), y escapando todos los campos dinámicos en tarjetas de tareas, modales HITL, historial y listas de memoria.
+
+3. **Eliminación de riesgo de inyección de código en `SafeScriptAdapter` (`hub/agent_adapters.py`):**
+   - **Causa:** `SafeScriptAdapter.execute_task()` generaba un script Python mediante un `f-string` que incrustaba `{sanitized_instruction}` dentro de una cadena triple `f'''...'''`. Si la instrucción contenía `'''` o expresiones `{...}`, podía romper el literal e inyectar código Python arbitrario.
+   - **Corrección:** Se reemplazó la interpolación en código fuente por una **plantilla Python 100% estática** y paso de parámetros exclusivamente mediante variables de entorno inertes (`YEDID_TASK_INSTRUCTION`, `YEDID_TASK_OUTPUT_PATH`, `YEDID_TASK_PROJECT_DIR`).
+
+4. **Recuperación correcta de los turnos más recientes en `get_recent_context_for_llm()` (`hub/chat_history_db.py`):**
+   - **Causa:** `get_recent_context_for_llm(limit)` delegaba en `get_messages(limit=limit * 2)`, cuya consulta usaba `ORDER BY created_at ASC LIMIT ?`. Al superar `limit * 2` mensajes, devolvía los mensajes **más antiguos** del inicio de la conversación en lugar de los más recientes.
+   - **Corrección:** Se implementó una subconsulta que selecciona los `limit * 2` mensajes más recientes (`ORDER BY created_at DESC, rowid DESC LIMIT ?`) y los reordena cronológicamente (`ORDER BY created_at ASC, rowid ASC`).
+
+5. **Deduplicación determinista por `client_message_id` (`hub/chat_history_db.py`, `hub/llm_router.py`):**
+   - **Causa:** Al detectar un `client_message_id` duplicado, `LLMRouter.chat()` consultaba `get_messages(conversation_id, limit=2)` (que traía los 2 mensajes más antiguos de la conversación) y devolvía `task: None`.
+   - **Corrección:** Se añadió `ChatHistoryDB.get_response_for_client_message_id(client_message_id, conversation_id)`, que localiza por `rowid` y `created_at` el mensaje de usuario exacto y devuelve la respuesta del asistente generada en ese turno junto con su tarea vinculada (`task_engine.get_task(task_id)`).
+
+6. **Prevención de condiciones de carrera entre `cancel_task()` y `_execute_task_pipeline()` (`hub/task_engine.py`):**
+   - **Causa:** Si `cancel_task()` se invocaba mientras una tarea estaba en `running`, al terminar el proceso hijo (con código de salida distinto de cero por `kill()`), `_execute_task_pipeline()` ejecutaba `UPDATE tasks SET status = 'failed' WHERE id = ?`, sobrescribiendo el estado `'cancelled'`. Asimismo, una tarea cancelada justo tras ser leída como `queued` podía pasar a `running`.
+   - **Corrección:**
+     - Se añadió verificación temprana `_is_task_cancelled(task_id)` y transición atómica *Compare-And-Set* (`UPDATE tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'`).
+     - Al finalizar el adaptador, el `UPDATE` final incluye `WHERE id = ? AND status != 'cancelled'`. Si la fila ya estaba en `'cancelled'`, se preserva intacto `status = 'cancelled'` y solo se registran los metadatos de cierre (`duration_seconds`, `exit_code`, `stdout`, `stderr`).
+
+---
+
+## 4. Problemas Conocidos / Limitaciones Actuales
 
 1. **Tiempo de inferencia en CPU (`qwen3:8b`):**
    - Por diseño, Ollama se ejecuta en CPU para reservar el 100% de la GPU a Sunshine/Gaming. Las respuestas conversacionales toman entre `3s` y `12s` dependiendo de la longitud del contexto.
@@ -68,8 +100,9 @@ Se diagnosticaron y resolvieron 5 aspectos observados durante pruebas desde el *
 
 ---
 
-## 4. Próximas Mejoras Sugeridas para Colaboración con ChatGPT
+## 5. Próximas Mejoras Sugeridas para Colaboración con ChatGPT
 
 1. **Streaming SSE opcional en `/api/chat`:** Evaluar entrega progresiva de tokens o estados de herramientas hacia la PWA del Galaxy Fold 7 manteniendo la escritura transaccional al finalizar el turno.
 2. **Resumen automático de títulos de conversación:** Generar un título descriptivo corto a partir del primer mensaje del usuario en `chat_history_db.py` en lugar de mantener `'Nueva Conversación'` por defecto.
 3. **Panel visual de métricas de `TaskEngine`:** Añadir en la PWA un filtro rápido de historial de tareas duraderas (`completed`, `waiting_approval`, `interrupted`) con visor directo de entregables generados en `sandbox/`.
+

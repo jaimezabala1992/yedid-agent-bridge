@@ -306,23 +306,29 @@ class LLMRouter:
             if not conv:
                 conv = chat_history_db.create_conversation(user_id=user_id, conversation_id=conversation_id)
 
-        # 2. Idempotencia y deduplicación por client_message_id
+        # 2. Idempotencia y deduplicación determinista por client_message_id
         if client_message_id and chat_history_db.is_message_duplicate(client_message_id):
-            logger.info(f"[ROUTER] Mensaje duplicado recibido (client_message_id: {client_message_id}). Recuperando última respuesta.")
-            messages = chat_history_db.get_messages(conversation_id, limit=2)
-            assistant_msg = next((m for m in reversed(messages) if m["role"] == "assistant"), None)
+            logger.info(f"[ROUTER] Mensaje duplicado recibido (client_message_id: {client_message_id}). Recuperando respuesta asociada.")
+            assistant_msg = chat_history_db.get_response_for_client_message_id(
+                client_message_id=client_message_id,
+                conversation_id=conversation_id
+            )
             if assistant_msg:
-                updated_conv = chat_history_db.get_conversation(conversation_id)
+                target_conv_id = assistant_msg.get("conversation_id") or conversation_id
+                updated_conv = chat_history_db.get_conversation(target_conv_id)
+                associated_task = None
+                if assistant_msg.get("task_id"):
+                    associated_task = task_engine.get_task(assistant_msg["task_id"])
                 return {
                     "reply": assistant_msg["content"],
-                    "conversation_id": conversation_id,
+                    "conversation_id": target_conv_id,
                     "conversation": updated_conv,
                     "tools_executed": assistant_msg.get("tools_called") or [],
-                    "task": None,
+                    "task": associated_task,
                     "deduplicated": True
                 }
 
-        # 3. Guardar mensaje del usuario en la base de datos de chat
+        # 3. Guardar mensaje del usuario en la base de datos de chat (idempotente si ya existía sin respuesta)
         chat_history_db.save_message(
             conversation_id=conversation_id,
             role="user",

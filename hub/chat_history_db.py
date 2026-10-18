@@ -174,25 +174,30 @@ class ChatHistoryDB:
             ).fetchone()
             return row is not None
 
+    @staticmethod
+    def _owner_email() -> str:
+        return os.getenv("YEDID_OWNER_EMAIL", "owner@example.com")
+
     def list_conversations(self, user: Optional[str] = None, user_id: Optional[str] = None, limit: int = 25) -> List[Dict[str, Any]]:
         """Lista las conversaciones activas ordenadas por última actualización con conteo real en SQLite."""
         effective_user = user or user_id
+        owner_email = self._owner_email()
         with self._get_connection() as conn:
             if effective_user:
                 cur = conn.execute("""
                     SELECT c.*, 
                            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.conversation_id) AS message_count,
-                           (SELECT m.content FROM messages m WHERE m.conversation_id = c.conversation_id ORDER BY m.created_at DESC LIMIT 1) AS last_message
+                           (SELECT m.content FROM messages m WHERE m.conversation_id = c.conversation_id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message
                     FROM conversations c
-                    WHERE (c.user = ? OR c.user IN ('jaime', os.getenv('YEDID_OWNER_EMAIL', 'owner@example.com'), 'api_client')) AND c.is_archived = 0
+                    WHERE (c.user = ? OR c.user IN ('jaime', ?, 'api_client')) AND c.is_archived = 0
                     ORDER BY c.updated_at DESC
                     LIMIT ?
-                """, (effective_user, limit))
+                """, (effective_user, owner_email, limit))
             else:
                 cur = conn.execute("""
                     SELECT c.*, 
                            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.conversation_id) AS message_count,
-                           (SELECT m.content FROM messages m WHERE m.conversation_id = c.conversation_id ORDER BY m.created_at DESC LIMIT 1) AS last_message
+                           (SELECT m.content FROM messages m WHERE m.conversation_id = c.conversation_id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_message
                     FROM conversations c
                     WHERE c.is_archived = 0
                     ORDER BY c.updated_at DESC
@@ -208,6 +213,7 @@ class ChatHistoryDB:
 
     def get_conversation(self, conversation_id: str, user: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Consulta metadata y conteo exacto de mensajes de una conversación en SQLite."""
+        owner_email = self._owner_email()
         with self._get_connection() as conn:
             if user:
                 cur = conn.execute(
@@ -215,9 +221,9 @@ class ChatHistoryDB:
                     SELECT c.*,
                            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.conversation_id) AS message_count
                     FROM conversations c
-                    WHERE c.conversation_id = ? AND (c.user = ? OR c.user IN ('jaime', os.getenv('YEDID_OWNER_EMAIL', 'owner@example.com'), 'api_client'))
+                    WHERE c.conversation_id = ? AND (c.user = ? OR c.user IN ('jaime', ?, 'api_client'))
                     """,
-                    (conversation_id, user)
+                    (conversation_id, user, owner_email)
                 )
             else:
                 cur = conn.execute(
@@ -280,10 +286,7 @@ class ChatHistoryDB:
                 dup = cur.fetchone()
                 if dup:
                     logger.info(f"Mensaje duplicado prevenido por client_message_id='{client_message_id}'")
-                    d = dict(dup)
-                    d["role"] = d.get("sender")
-                    d["tools_called"] = tool_calls
-                    return d
+                    return self._parse_message_row(dup)
 
             msg_id = f"msg_{uuid.uuid4().hex[:12]}"
             conn.execute("""
@@ -343,15 +346,104 @@ class ChatHistoryDB:
             client_message_id=client_message_id
         )
 
+    @staticmethod
+    def _parse_message_row(row: sqlite3.Row) -> Dict[str, Any]:
+        d = dict(row)
+        d["role"] = d.get("sender")
+        if d.get("tool_calls"):
+            try:
+                d["tool_calls"] = json.loads(d["tool_calls"])
+                d["tools_called"] = d["tool_calls"]
+            except Exception:
+                d["tools_called"] = []
+        else:
+            d["tools_called"] = []
+        if d.get("tool_results"):
+            try:
+                d["tool_results"] = json.loads(d["tool_results"])
+            except Exception:
+                pass
+        return d
+
     def get_message_by_client_id(self, client_message_id: str) -> Optional[Dict[str, Any]]:
         """Busca un mensaje por su client_message_id para deduplicación."""
         with self._get_connection() as conn:
             cur = conn.execute("SELECT * FROM messages WHERE client_message_id = ?", (client_message_id,))
             row = cur.fetchone()
             if row:
-                d = dict(row)
-                d["role"] = d.get("sender")
-                return d
+                return self._parse_message_row(row)
+            return None
+
+    def get_response_for_client_message_id(
+        self,
+        client_message_id: str,
+        conversation_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Encuentra el mensaje de usuario asociado a `client_message_id` y devuelve
+        la respuesta exacta del asistente generada inmediatamente después en esa conversación,
+        antes del siguiente mensaje de usuario.
+        """
+        if not client_message_id:
+            return None
+        with self._get_connection() as conn:
+            if conversation_id:
+                user_row = conn.execute(
+                    "SELECT rowid, conversation_id, created_at FROM messages WHERE client_message_id = ? AND conversation_id = ? LIMIT 1",
+                    (client_message_id, conversation_id)
+                ).fetchone()
+            else:
+                user_row = conn.execute(
+                    "SELECT rowid, conversation_id, created_at FROM messages WHERE client_message_id = ? LIMIT 1",
+                    (client_message_id,)
+                ).fetchone()
+
+            if not user_row:
+                return None
+
+            u_rowid = user_row["rowid"]
+            u_conv = user_row["conversation_id"]
+            u_created = user_row["created_at"]
+
+            # Buscar si hubo otro turno de usuario posterior para acotar el rango del turno
+            next_user_row = conn.execute("""
+                SELECT rowid, created_at FROM messages
+                WHERE conversation_id = ? AND sender = 'user'
+                  AND (created_at > ? OR (created_at = ? AND rowid > ?))
+                ORDER BY created_at ASC, rowid ASC
+                LIMIT 1
+            """, (u_conv, u_created, u_created, u_rowid)).fetchone()
+
+            if next_user_row:
+                assistant_row = conn.execute("""
+                    SELECT message_id, conversation_id, sender, content,
+                           tool_calls, tool_results, task_id, client_message_id,
+                           created_at, created_iso
+                    FROM messages
+                    WHERE conversation_id = ? AND sender = 'assistant'
+                      AND (created_at > ? OR (created_at = ? AND rowid > ?))
+                      AND (created_at < ? OR (created_at = ? AND rowid < ?))
+                    ORDER BY created_at ASC, rowid ASC
+                    LIMIT 1
+                """, (
+                    u_conv,
+                    u_created, u_created, u_rowid,
+                    next_user_row["created_at"], next_user_row["created_at"], next_user_row["rowid"]
+                )).fetchone()
+            else:
+                assistant_row = conn.execute("""
+                    SELECT message_id, conversation_id, sender, content,
+                           tool_calls, tool_results, task_id, client_message_id,
+                           created_at, created_iso
+                    FROM messages
+                    WHERE conversation_id = ? AND sender = 'assistant'
+                      AND (created_at > ? OR (created_at = ? AND rowid > ?))
+                    ORDER BY created_at ASC, rowid ASC
+                    LIMIT 1
+                """, (u_conv, u_created, u_created, u_rowid)).fetchone()
+
+            if assistant_row:
+                return self._parse_message_row(assistant_row)
             return None
 
     def get_messages(self, conversation_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -363,44 +455,40 @@ class ChatHistoryDB:
                        created_at, created_iso
                 FROM messages
                 WHERE conversation_id = ?
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, rowid ASC
                 LIMIT ?
             """, (conversation_id, limit))
-            rows = []
-            for r in cur.fetchall():
-                d = dict(r)
-                d["role"] = d.get("sender")
-                if d.get("tool_calls"):
-                    try:
-                        d["tool_calls"] = json.loads(d["tool_calls"])
-                        d["tools_called"] = d["tool_calls"]
-                    except Exception:
-                        d["tools_called"] = []
-                else:
-                    d["tools_called"] = []
-                if d.get("tool_results"):
-                    try:
-                        d["tool_results"] = json.loads(d["tool_results"])
-                    except Exception:
-                        pass
-                rows.append(d)
-            return rows
+            return [self._parse_message_row(r) for r in cur.fetchall()]
 
     def get_recent_context_for_llm(self, conversation_id: str, limit: int = 8) -> List[Dict[str, Any]]:
-        """Devuelve los últimos turnos en formato [{'role': ..., 'content': ...}] para el LLM."""
-        messages = self.get_messages(conversation_id, limit=limit * 2)
+        """Devuelve los últimos turnos más recientes en orden cronológico [{'role': ..., 'content': ...}] para el LLM."""
+        max_messages = max(1, limit * 2)
+        with self._get_connection() as conn:
+            cur = conn.execute("""
+                SELECT sender, content
+                FROM (
+                    SELECT sender, content, created_at, rowid
+                    FROM messages
+                    WHERE conversation_id = ?
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                )
+                ORDER BY created_at ASC, rowid ASC
+            """, (conversation_id, max_messages))
+            rows = cur.fetchall()
         llm_msgs = []
-        for m in messages:
-            role = "user" if m.get("sender") == "user" or m.get("role") == "user" else "assistant"
+        for m in rows:
+            role = "user" if m["sender"] == "user" else "assistant"
             llm_msgs.append({"role": role, "content": m["content"]})
         return llm_msgs
 
     def delete_conversation(self, conversation_id: str, user: str = "jaime") -> bool:
         """Elimina una conversación y sus mensajes asociados en cascada."""
+        owner_email = self._owner_email()
         with self._get_connection() as conn:
             cur = conn.execute(
-                "DELETE FROM conversations WHERE conversation_id = ? AND (user = ? OR user IN ('jaime', os.getenv('YEDID_OWNER_EMAIL', 'owner@example.com'), 'api_client'))",
-                (conversation_id, user)
+                "DELETE FROM conversations WHERE conversation_id = ? AND (user = ? OR user IN ('jaime', ?, 'api_client'))",
+                (conversation_id, user, owner_email)
             )
             conn.commit()
             return cur.rowcount > 0

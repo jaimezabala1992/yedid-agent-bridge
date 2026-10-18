@@ -1593,6 +1593,16 @@
             }
         }
 
+        function escapeHtml(val) {
+            if (val === null || val === undefined) return '';
+            return String(val)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function renderApprovalsModal(list) {
             const container = document.getElementById('approvals-list');
             if (!container) return;
@@ -1602,11 +1612,12 @@
             }
             container.innerHTML = list.map(item => {
                 const params = item.params || {};
-                const taskId = item.task_id || params.task_id || item.action || 'N/D';
-                const agentName = item.agent || params.agent || item.requester || 'sistema';
-                const scopePath = item.scope || params.project_path || params.allowed_project_path || 'Sistema Local';
-                const riskLabel = item.risk_label || item.risk_level || 'ALTO (HIGH)';
-                const instructionText = item.instruction || params.instruction || item.description || '';
+                const taskId = escapeHtml(item.task_id || params.task_id || item.action || 'N/D');
+                const agentName = escapeHtml(item.agent || params.agent || item.requester || 'sistema');
+                const scopePath = escapeHtml(item.scope || params.project_path || params.allowed_project_path || 'Sistema Local');
+                const riskLabel = escapeHtml(item.risk_label || item.risk_level || 'ALTO (HIGH)');
+                const instructionText = escapeHtml(item.instruction || params.instruction || item.description || '');
+                const safeId = escapeHtml(item.id || '');
                 return `
                 <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1619,10 +1630,10 @@
                     <div style="font-size: 0.76rem; color: var(--text-primary); line-height: 1.35;">
                         📝 <strong>Instrucción:</strong> ${instructionText}
                     </div>
-                    <div style="font-size: 0.66rem; color: var(--text-secondary);">ID Aprobación: <span style="font-family: monospace;">${item.id}</span></div>
+                    <div style="font-size: 0.66rem; color: var(--text-secondary);">ID Aprobación: <span style="font-family: monospace;">${safeId}</span></div>
                     <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
-                        <button class="btn" style="padding: 5px 10px; font-size: 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" onclick="resolveApproval('${item.id}', 'reject')">❌ Rechazar</button>
-                        <button class="btn btn-center" style="padding: 5px 12px; font-size: 0.75rem;" onclick="resolveApproval('${item.id}', 'approve')">✅ Autorizar y Ejecutar</button>
+                        <button class="btn" style="padding: 5px 10px; font-size: 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" onclick="resolveApproval('${safeId}', 'reject')">❌ Rechazar</button>
+                        <button class="btn btn-center" style="padding: 5px 12px; font-size: 0.75rem;" onclick="resolveApproval('${safeId}', 'approve')">✅ Autorizar y Ejecutar</button>
                     </div>
                 </div>
             `}).join('');
@@ -2361,11 +2372,11 @@
                         <input type="checkbox" class="import-preview-cb" data-index="${idx}" checked onchange="updateImportPreviewCount()" style="margin-top: 3px; cursor: pointer;">
                         <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
-                                <strong style="font-size: 0.76rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.title || 'Sin Título'}</strong>
-                                <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600; flex-shrink: 0;">${lvl}</span>
+                                <strong style="font-size: 0.76rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.title || 'Sin Título')}</strong>
+                                <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600; flex-shrink: 0;">${escapeHtml(lvl)}</span>
                             </div>
-                            <div style="font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.3; max-height: 40px; overflow: hidden; text-overflow: ellipsis;">${item.content || ''}</div>
-                            <div style="font-size: 0.62rem; color: var(--text-secondary); margin-top: 2px;">🏷️ ${item.category || 'general'}</div>
+                            <div style="font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.3; max-height: 40px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.content || '')}</div>
+                            <div style="font-size: 0.62rem; color: var(--text-secondary); margin-top: 2px;">🏷️ ${escapeHtml(item.category || 'general')}</div>
                         </div>
                     </div>
                 `;
@@ -2514,19 +2525,20 @@
                             badgeBg = 'rgba(6, 182, 212, 0.2)';
                             badgeColor = 'var(--accent-cyan)';
                         }
+                        const safeId = escapeHtml(item.id || '');
 
                         return `
                             <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <strong style="font-size: 0.78rem; color: var(--text-primary);">${item.title}</strong>
-                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${item.access_level}</span>
+                                    <strong style="font-size: 0.78rem; color: var(--text-primary);">${escapeHtml(item.title)}</strong>
+                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${escapeHtml(item.access_level)}</span>
                                 </div>
-                                <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.35; white-space: pre-wrap; word-break: break-word;">${item.content}</div>
+                                <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.35; white-space: pre-wrap; word-break: break-word;">${escapeHtml(item.content)}</div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${item.category} • <span style="font-size: 0.6rem; opacity: 0.7;">${item.origin || ''}</span></span>
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${escapeHtml(item.category)} • <span style="font-size: 0.6rem; opacity: 0.7;">${escapeHtml(item.origin || '')}</span></span>
                                     <div style="display: flex; gap: 4px;">
-                                        <button class="btn" style="padding: 2px 6px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewSingleMemory('${item.id}', 'discard')">❌ Descartar</button>
-                                        <button class="btn btn-center" style="padding: 2px 6px; font-size: 0.68rem;" onclick="reviewSingleMemory('${item.id}', 'approve')">✅ Aprobar</button>
+                                        <button class="btn" style="padding: 2px 6px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewSingleMemory('${safeId}', 'discard')">❌ Descartar</button>
+                                        <button class="btn btn-center" style="padding: 2px 6px; font-size: 0.68rem;" onclick="reviewSingleMemory('${safeId}', 'approve')">✅ Aprobar</button>
                                     </div>
                                 </div>
                             </div>
@@ -2575,23 +2587,24 @@
                             badgeBg = 'rgba(6, 182, 212, 0.2)';
                             badgeColor = 'var(--accent-cyan)';
                         }
+                        const safeId = escapeHtml(item.id || '');
 
                         return `
                             <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 3px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <strong style="font-size: 0.76rem; color: var(--text-primary); cursor: pointer;" onclick="viewMemoryDetail('${item.id}')">${item.title}</strong>
-                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${item.access_level}</span>
+                                    <strong style="font-size: 0.76rem; color: var(--text-primary); cursor: pointer;" onclick="viewMemoryDetail('${safeId}')">${escapeHtml(item.title)}</strong>
+                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${escapeHtml(item.access_level)}</span>
                                 </div>
                                 <div style="font-size: 0.72rem; color: ${isLocked ? 'var(--accent-orange)' : 'var(--text-secondary)'}; line-height: 1.35; white-space: pre-wrap; word-break: break-word;">
-                                    ${item.content}
+                                    ${escapeHtml(item.content)}
                                     ${isLocked ? ' <button class="btn" style="padding: 1px 5px; font-size: 0.65rem; display: inline-flex;" onclick="openStepupModal()">Desbloquear</button>' : ''}
                                 </div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 3px;">
-                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${item.category} • <span style="font-size: 0.6rem; opacity: 0.7;">${item.id}</span></span>
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${escapeHtml(item.category)} • <span style="font-size: 0.6rem; opacity: 0.7;">${safeId}</span></span>
                                     <div style="display: flex; gap: 4px;">
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" onclick="viewMemoryDetail('${item.id}')" title="Consultar detalle completo">👁️ Ver</button>
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem;" onclick="openEditMemoryModal('${item.id}')" title="Editar / Corregir recuerdo">✏️ Editar</button>
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="deleteMemory('${item.id}')" title="Eliminar recuerdo definitivamente">🗑️ Borrar</button>
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" onclick="viewMemoryDetail('${safeId}')" title="Consultar detalle completo">👁️ Ver</button>
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem;" onclick="openEditMemoryModal('${safeId}')" title="Editar / Corregir recuerdo">✏️ Editar</button>
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="deleteMemory('${safeId}')" title="Eliminar recuerdo definitivamente">🗑️ Borrar</button>
                                     </div>
                                 </div>
                             </div>
@@ -2668,8 +2681,8 @@
                             const timeStr = a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '';
                             return `
                                 <div class="action-item">
-                                    <span>${a.description}</span>
-                                    <span style="color: var(--text-secondary); font-size: 0.7rem;">${timeStr}</span>
+                                    <span>${escapeHtml(a.description)}</span>
+                                    <span style="color: var(--text-secondary); font-size: 0.7rem;">${escapeHtml(timeStr)}</span>
                                 </div>
                             `;
                         }).join('');
@@ -2802,8 +2815,9 @@
 
                 sel.innerHTML = list.map(c => {
                     const count = typeof c.message_count === 'number' ? c.message_count : 0;
-                    const title = c.title || 'Conversación';
-                    return `<option value="${c.id}" ${c.id === currentConversationId ? 'selected' : ''}>${title} (${count} msgs)</option>`;
+                    const title = escapeHtml(c.title || 'Conversación');
+                    const safeId = escapeHtml(c.id || '');
+                    return `<option value="${safeId}" ${c.id === currentConversationId ? 'selected' : ''}>${title} (${count} msgs)</option>`;
                 }).join('');
                 sel.value = currentConversationId;
                 return list;
@@ -2875,7 +2889,7 @@
             const status = task.status || 'queued';
             let badgeBg = 'rgba(6, 182, 212, 0.2)';
             let badgeColor = 'var(--accent-cyan)';
-            let statusLabel = status.toUpperCase();
+            let statusLabel = escapeHtml(status.toUpperCase());
 
             if (status === 'completed') {
                 badgeBg = 'rgba(16, 185, 129, 0.2)';
@@ -2904,20 +2918,23 @@
                     <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">
                         <span style="font-size: 0.65rem; color: #86efac; font-weight: 600;">📁 Evidencia en disco (Entregables):</span>
                         <ul style="margin: 2px 0 0 14px; padding: 0; font-size: 0.66rem; color: var(--text-secondary);">
-                            ${deliverables.slice(0, 4).map(d => `<li>${d.name} (${d.size_bytes} B)</li>`).join('')}
+                            ${deliverables.slice(0, 4).map(d => `<li>${escapeHtml(d.name)} (${escapeHtml(d.size_bytes)} B)</li>`).join('')}
                         </ul>
                     </div>
                 `;
             }
 
+            const safeTaskId = escapeHtml(task.id || '');
+            const safeApprovalId = escapeHtml(task.approval_id || '');
+
             let approvalButtonHtml = '';
             if (status === 'waiting_approval' && task.approval_id) {
                 approvalButtonHtml = `
                     <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed rgba(245, 158, 11, 0.25);">
-                        <div style="font-size: 0.64rem; color: var(--accent-orange);">🔒 ID Aprobación: <span style="font-family: monospace;">${task.approval_id}</span></div>
+                        <div style="font-size: 0.64rem; color: var(--accent-orange);">🔒 ID Aprobación: <span style="font-family: monospace;">${safeApprovalId}</span></div>
                         <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 5px;">
-                            <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="resolveApproval('${task.approval_id}', 'reject')">❌ Rechazar</button>
-                            <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="resolveApproval('${task.approval_id}', 'approve')">✅ Autorizar y Ejecutar</button>
+                            <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="resolveApproval('${safeApprovalId}', 'reject')">❌ Rechazar</button>
+                            <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="resolveApproval('${safeApprovalId}', 'approve')">✅ Autorizar y Ejecutar</button>
                         </div>
                     </div>
                 `;
@@ -2927,32 +2944,34 @@
             if (status === 'interrupted' || status === 'failed') {
                 resumeButtonHtml = `
                     <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px;">
-                        <button class="btn" style="padding: 3px 10px; font-size: 0.68rem; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); cursor: pointer; border-radius: 4px;" onclick="resumeTask('${task.id}')">🔄 Reanudar Tarea</button>
+                        <button class="btn" style="padding: 3px 10px; font-size: 0.68rem; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); cursor: pointer; border-radius: 4px;" onclick="resumeTask('${safeTaskId}')">🔄 Reanudar Tarea</button>
                     </div>
                 `;
             }
 
-            const scopePath = task.project_path || 'C:\\Yedid-Smart-Home\\sandbox';
-            const riskLabel = task.risk_level === 'HIGH' ? 'ALTO (HIGH)' : (task.risk_level || 'BAJO (LOW)');
+            const scopePath = escapeHtml(task.project_path || 'C:\\Yedid-Smart-Home\\sandbox');
+            const riskLabel = escapeHtml(task.risk_level === 'HIGH' ? 'ALTO (HIGH)' : (task.risk_level || 'BAJO (LOW)'));
+            const safeInstruction = escapeHtml(task.instruction || '');
+            const safeAgent = escapeHtml(task.agent || 'sistema');
 
             return `
-                <div class="chat-task-card" id="task-card-${task.id}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-top: 6px; font-size: 0.72rem;">
+                <div class="chat-task-card" id="task-card-${safeTaskId}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-top: 6px; font-size: 0.72rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px; flex-wrap: wrap;">
                         <strong style="color: var(--accent-cyan); display: flex; align-items: center; gap: 4px;">
-                            ⚡ Tarea: <span style="font-family: monospace; font-size: 0.68rem;">${task.id}</span>
+                            ⚡ Tarea: <span style="font-family: monospace; font-size: 0.68rem;">${safeTaskId}</span>
                         </strong>
                         <span style="font-size: 0.62rem; padding: 1px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor}; font-weight: 700;">
                             ${statusLabel}
                         </span>
                     </div>
                     <div style="color: var(--text-primary); margin-top: 4px; line-height: 1.3;">
-                        ${task.instruction}
+                        ${safeInstruction}
                     </div>
                     <div style="font-size: 0.65rem; color: var(--accent-cyan); margin-top: 4px; word-break: break-all;">
                         📁 Alcance: <span style="font-family: monospace;">${scopePath}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-secondary); margin-top: 4px;">
-                        <span>Agente: <strong style="color: var(--text-primary);">${task.agent}</strong></span>
+                        <span>Agente: <strong style="color: var(--text-primary);">${safeAgent}</strong></span>
                         <span>Riesgo: <strong style="color: ${task.risk_level === 'HIGH' ? '#fca5a5' : '#86efac'};">${riskLabel}</strong></span>
                     </div>
                     ${deliverablesHtml}
@@ -3067,38 +3086,34 @@
                 safeText = `✅ He ejecutado las herramientas solicitadas (${toolNames}) y verificado el estado real en disco.`;
             }
             if (!safeText) return '';
-            // Si el texto ya contiene etiquetas HTML conocidas generadas internamente, respetarlo; de lo contrario, formatear Markdown ligero
-            if (! safeText.includes('<div') && !safeText.includes('<strong')) {
-                safeText = safeText
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>')
-                    .replace(/\n/g, '<br>');
-            }
+            // Escapar siempre de manera incondicional cualquier carácter HTML antes de aplicar formato Markdown seguro
+            safeText = escapeHtml(safeText)
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>')
+                .replace(/\n/g, '<br>');
             return safeText;
         }
 
         // Chat Logic con Integración de Propuestas de Memoria y Tarjetas de Tareas
         function appendMessage(sender, text, tools = [], taskId = null, taskInfo = null, timestamp = null) {
             const container = document.getElementById('chat-messages');
+            const safeSender = sender === 'assistant' ? 'assistant' : 'user';
             const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${sender}`;
+            msgDiv.className = `message ${safeSender}`;
 
             let toolChipsHtml = '';
             let proposalsHtml = '';
             if (tools && tools.length > 0) {
                 tools.forEach(t => {
-                    const tName = t.tool || 'herramienta';
+                    const tName = escapeHtml(t.tool || 'herramienta');
                     toolChipsHtml += `<div class="tool-chip">⚙️ Herramienta: ${tName}</div> `;
-                    if (tName === 'propose_memory_to_save' && t.result) {
+                    if ((t.tool || '') === 'propose_memory_to_save' && t.result) {
                         const r = t.result;
-                        const memId = r.id;
-                        const title = r.title || 'Nuevo recuerdo';
-                        const category = r.category || 'general';
-                        const level = r.access_level || 'personal';
-                        const content = r.content || '';
+                        const memId = escapeHtml(r.id || '');
+                        const title = escapeHtml(r.title || 'Nuevo recuerdo');
+                        const category = escapeHtml(r.category || 'general');
+                        const level = escapeHtml(r.access_level || 'personal');
+                        const content = escapeHtml(r.content || '');
                         proposalsHtml += `
                             <div class="chat-memory-proposal" id="proposal-${memId}" style="background: rgba(6,182,212,0.12); border: 1px solid var(--accent-cyan); border-radius: 8px; padding: 8px; margin-top: 8px; font-size: 0.74rem;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -3126,14 +3141,14 @@
             if (timestamp) {
                 try {
                     const d = new Date(timestamp);
-                    timeLabel = `<span style="font-size: 0.62rem; color: var(--text-secondary); opacity: 0.7; float: right; margin-left: 8px;">${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+                    timeLabel = `<span style="font-size: 0.62rem; color: var(--text-secondary); opacity: 0.7; float: right; margin-left: 8px;">${escapeHtml(d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}))}</span>`;
                 } catch (e) {}
             }
 
             const formattedBody = formatChatTextHtml(text, tools);
 
             msgDiv.innerHTML = `
-                <div class="avatar ${sender}">${sender === 'assistant' ? 'Y' : 'J'}</div>
+                <div class="avatar ${safeSender}">${safeSender === 'assistant' ? 'Y' : 'J'}</div>
                 <div class="bubble">
                     ${timeLabel}
                     <div style="line-height: 1.42;">${formattedBody}</div>
