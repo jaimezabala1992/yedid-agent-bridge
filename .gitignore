@@ -1,0 +1,46 @@
+# =============================================================================
+# Yedid Smart Hub — GitIgnore de Seguridad Estricta (Repositorio Público)
+# =============================================================================
+
+# 1. Bases de datos locales, historiales de chat, tareas y memoria personal
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+
+# 2. Credenciales, tokens, variables de entorno y certificados
+.env
+.env.*
+!.env.example
+.token
+.github_token
+*.pem
+*.key
+*.crt
+*.pfx
+.tvremote/
+
+# 3. Respaldos, exportaciones, logs y reportes de portapapeles
+backups/
+exports/
+sandbox/
+scratch/
+*.jsonl
+*.log
+*.bak
+*clipboard*.txt
+
+# 4. Cachés de Python, pruebas y sistema operativo
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+Thumbs.db
+.DS_Store

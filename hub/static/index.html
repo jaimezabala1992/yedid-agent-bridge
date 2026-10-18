@@ -1,0 +1,3499 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Yedid Smart Hub</title>
+    <!-- PWA Configuración para Samsung Galaxy Z Fold 7 y navegadores -->
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <meta name="theme-color" content="#0a0f1d">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script>
+        // Monitor temprano de salud y contingencia de la interfaz
+        window.__yedidErrors = [];
+        window.addEventListener('error', function(e) {
+            console.error("Yedid Runtime Error:", e);
+            window.__yedidErrors.push(e.message || String(e));
+            if (typeof triggerEmergencyRecovery === 'function') {
+                triggerEmergencyRecovery(e.message || "Error al inicializar interfaz");
+            }
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            console.warn("Yedid Unhandled Rejection:", e.reason);
+            window.__yedidErrors.push(String(e.reason));
+        });
+    </script>
+    <style>
+        :root {
+            --bg-primary: #0a0f1d;
+            --bg-secondary: #131d31;
+            --bg-card: #18233c;
+            --bg-hover: #223254;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-cyan: #06b6d4;
+            --accent-purple: #8b5cf6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-orange: #f59e0b;
+            --border-color: #26385a;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Cabecera y Barra Superior Fija */
+        .sticky-top-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background-color: var(--bg-primary);
+        }
+
+        header {
+            background-color: rgba(19, 29, 49, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.1rem;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(6, 182, 212, 0.35);
+        }
+
+        .brand-title {
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            line-height: 1.2;
+        }
+
+        .brand-subtitle {
+            font-size: 0.68rem;
+            color: var(--text-secondary);
+        }
+
+        .status-pills {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pill {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--accent-orange);
+        }
+
+        .dot.online {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 6px var(--accent-green);
+        }
+
+        .dot.offline {
+            background-color: var(--accent-red);
+        }
+
+        /* En pantallas compactas como Galaxy Fold cover (<= 480px) */
+        @media (max-width: 480px) {
+            header {
+                padding: 6px 10px;
+            }
+            .brand-logo {
+                width: 26px;
+                height: 26px;
+                font-size: 0.95rem;
+            }
+            .brand-title {
+                font-size: 0.88rem;
+            }
+            .brand-subtitle {
+                display: none;
+            }
+            .pill {
+                padding: 3px 6px;
+                font-size: 0.68rem;
+            }
+        }
+
+        /* Barra de Navegación Universal (Fold cerrado, Fold abierto y Escritorio) */
+        .main-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 5px 10px;
+            overflow-x: auto;
+            white-space: nowrap;
+            gap: 8px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .main-nav::-webkit-scrollbar {
+            display: none;
+        }
+
+        .nav-tabs-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .nav-tabs-group::-webkit-scrollbar {
+            display: none;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 7px 12px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+            user-select: none;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            background-color: var(--bg-hover);
+            color: var(--accent-cyan);
+            border: 1px solid var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(6, 182, 212, 0.25);
+        }
+
+        .btn-mode-toggle {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 5px 10px;
+            font-size: 0.74rem;
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+            margin-left: auto;
+            transition: all 0.15s ease;
+        }
+
+        .btn-mode-toggle:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-cyan);
+        }
+
+        /* Layout contenedor adaptativo para Galaxy Z Fold 7 */
+        .container {
+            display: grid;
+            grid-template-columns: 1fr;
+            padding: 12px;
+            gap: 14px;
+            max-width: 1440px;
+            margin: 0 auto;
+            width: 100%;
+            flex: 1;
+        }
+
+        /* Gestión estricta de visibilidad de pestañas en Modo Pestañas (Default) */
+        .tab-content {
+            display: none !important;
+            scroll-margin-top: 115px;
+        }
+
+        .tab-content.active {
+            display: flex !important;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .sidebar {
+            display: contents; /* En modo pestañas desempaqueta los hijos directamente en el contenedor */
+            gap: 14px;
+        }
+
+        /* Soporte de Modo Dashboard (Todos los paneles visibles con desplazamiento automático inteligente) */
+        body.mode-dashboard .container {
+            grid-template-columns: minmax(320px, 380px) 1fr;
+        }
+
+        @media (max-width: 768px) {
+            body.mode-dashboard .container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        body.mode-dashboard .sidebar {
+            display: flex !important;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        body.mode-dashboard .tab-content {
+            display: flex !important;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        body.mode-dashboard .tab-content.tab-highlighted {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 16px rgba(6, 182, 212, 0.4);
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Control TV */
+        .tv-status-badge {
+            font-size: 0.78rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background-color: var(--bg-hover);
+            color: var(--text-secondary);
+        }
+
+        .remote-dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            width: 180px;
+            margin: 0 auto;
+        }
+
+        .btn {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 9px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            user-select: none;
+        }
+
+        .btn:hover {
+            background-color: var(--bg-hover);
+            border-color: #3b527e;
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn-power {
+            background-color: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+            font-weight: 600;
+            padding: 6px 12px;
+        }
+
+        .btn-profile.active {
+            background-color: rgba(6, 182, 212, 0.2) !important;
+            border-color: var(--accent-cyan) !important;
+            color: var(--accent-cyan) !important;
+            box-shadow: 0 0 8px rgba(6, 182, 212, 0.3);
+        }
+
+        .btn-power.is-on {
+            background-color: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.4);
+            color: #86efac;
+        }
+
+        .btn-center {
+            background-color: var(--accent-cyan);
+            color: #0a0f1d;
+            font-weight: 700;
+            border: none;
+        }
+
+        .remote-actions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+
+        .remote-apps {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+        }
+
+        .btn-app {
+            font-size: 0.78rem;
+            padding: 7px;
+        }
+
+        /* Métricas PC */
+        .metric-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.82rem;
+        }
+
+        .metric-bar-bg {
+            width: 100%;
+            height: 6px;
+            background-color: var(--bg-hover);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 3px;
+        }
+
+        .metric-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* Historial de Acciones */
+        .action-feed {
+            max-height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 0.78rem;
+        }
+
+        .action-item {
+            padding: 6px 8px;
+            background-color: var(--bg-secondary);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-cyan);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Sección de Chat */
+        .chat-section {
+            flex-direction: column;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            height: calc(100vh - 100px);
+            min-height: 480px;
+        }
+
+        .chat-header {
+            padding: 10px 16px;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            max-width: 86%;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+        }
+
+        .avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+            font-weight: bold;
+        }
+
+        .avatar.assistant {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: #fff;
+        }
+
+        .avatar.user {
+            background-color: #3b527e;
+            color: #fff;
+        }
+
+        .bubble {
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 0.88rem;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+
+        .message.assistant .bubble {
+            background-color: var(--bg-hover);
+            color: var(--text-primary);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.user .bubble {
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .tool-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.72rem;
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--accent-cyan);
+            padding: 2px 7px;
+            border-radius: 5px;
+            margin-top: 5px;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+
+        /* Chips sugerencias */
+        .suggestion-chips {
+            padding: 6px 12px;
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            white-space: nowrap;
+            border-top: 1px solid var(--border-color);
+            scrollbar-width: none;
+        }
+
+        .suggestion-chips::-webkit-scrollbar {
+            display: none;
+        }
+
+        .chip {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 5px 10px;
+            border-radius: 14px;
+            font-size: 0.74rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .chip:hover {
+            background-color: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* Input chat */
+        .chat-input-area {
+            padding: 10px 14px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background-color: var(--bg-secondary);
+        }
+
+        .chat-input {
+            flex: 1;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .chat-input:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.05rem;
+            flex-shrink: 0;
+        }
+
+        .btn-mic.recording {
+            background-color: var(--accent-red) !important;
+            color: white !important;
+            animation: pulse 1.2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+            100% { transform: scale(1); }
+        }
+
+        /* Modal Token */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 16px;
+        }
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            width: 100%;
+            max-width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Banner de Contingencia y Recuperación Inmediata de PWA -->
+    <div id="emergency-recovery-banner" style="display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 999999; background: #7f1d1d; color: #fff; padding: 12px 16px; border-bottom: 2px solid #ef4444; box-shadow: 0 4px 20px rgba(0,0,0,0.8); font-family: system-ui, -apple-system, sans-serif;">
+        <div style="display: flex; justify-content: space-between; align-items: center; max-width: 900px; margin: 0 auto; gap: 12px; flex-wrap: wrap;">
+            <div style="font-size: 0.85rem; line-height: 1.4;">
+                <strong style="color: #fef08a;">⚠️ Recuperación de PWA Activa:</strong>
+                <span id="emergency-error-desc" style="color: #f8fafc;">Se detectó una versión desactualizada o anomalía de renderizado en tu pantalla.</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button onclick="emergencyRepairApp()" style="background: #ffffff; color: #991b1b; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
+                    ↻ Reparar y Recargar PWA
+                </button>
+                <button onclick="document.getElementById('emergency-recovery-banner').style.display='none'" style="background: rgba(0,0,0,0.3); color: #fff; border: 1px solid rgba(255,255,255,0.4); padding: 8px 12px; border-radius: 6px; font-size: 0.82rem; cursor: pointer;">
+                    Ocultar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Token / Login de Acceso Seguro -->
+    <div id="auth-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3 style="font-size: 1.05rem; color: var(--accent-cyan);">🔐 Autenticación Segura Yedid Hub</h3>
+            <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4;">
+                Introduce tu clave autorizada para iniciar sesión con cookies protegidas HttpOnly y CSRF en tu Galaxy Fold 7:
+            </p>
+            <input type="password" id="input-token" class="chat-input" placeholder="Clave de acceso de Yedid Hub..." onkeydown="if(event.key==='Enter') performLogin()">
+            <div id="login-error" style="color: var(--accent-red); font-size: 0.76rem; display: none;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
+                <button class="btn btn-center" id="btn-login-submit" onclick="performLogin()">Iniciar Sesión Segura</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Autorizaciones Humanas de Alto Riesgo -->
+    <div id="approvals-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3 style="font-size: 1.05rem; color: var(--accent-orange); display: flex; align-items: center; gap: 6px;">
+                ⚠️ Solicitudes de Autorización Humana
+            </h3>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
+                Las siguientes acciones fueron solicitadas por ChatGPT u orquestadores y están retenidas por ser de ALTO RIESGO:
+            </p>
+            <div id="approvals-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto;">
+                <div style="color: var(--text-secondary); text-align: center; padding: 10px;">Cargando solicitudes...</div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+                <button class="btn" onclick="document.getElementById('approvals-modal').style.display='none'">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Step-Up para Recuerdos Muy Privados -->
+    <div id="stepup-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3 style="font-size: 1.05rem; color: var(--accent-red); display: flex; align-items: center; gap: 6px;">
+                🔐 Reautenticación de Paso Elevado (Step-Up)
+            </h3>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
+                Los recuerdos clasificados como <strong>muy_privado</strong> (salud, finanzas, familia) están cifrados en reposo con AES-256-GCM y requieren que confirmes tu clave de propietario para desbloquear la sesión temporal (15 min):
+            </p>
+            <input type="password" id="input-stepup-secret" class="chat-input" placeholder="Clave de seguridad de Jaime..." onkeydown="if(event.key==='Enter') performStepupAuth()">
+            <div id="stepup-error" style="color: var(--accent-red); font-size: 0.76rem; display: none;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+                <button class="btn" onclick="document.getElementById('stepup-modal').style.display='none'">Cancelar</button>
+                <button class="btn btn-center" onclick="performStepupAuth()">Desbloquear Datos Sensibles</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Edición y Corrección de Recuerdos (Memory Engine v2.2) -->
+    <div id="edit-memory-modal" class="modal-overlay" style="display: none;">
+        <div class="modal" style="max-width: 480px; width: 90%;">
+            <h3 style="font-size: 1.05rem; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                ✏️ Editar / Corregir Recuerdo
+            </h3>
+            <input type="hidden" id="edit-mem-id">
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
+                <div>
+                    <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">Título:</label>
+                    <input type="text" id="edit-mem-title" class="chat-input" style="width: 100%; box-sizing: border-box;" placeholder="Título del recuerdo...">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">Categoría:</label>
+                        <select id="edit-mem-category" style="width: 100%; box-sizing: border-box; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.75rem; border-radius: 6px; padding: 6px;">
+                            <option value="familia">Familia</option>
+                            <option value="salud">Salud</option>
+                            <option value="finanzas">Finanzas</option>
+                            <option value="trabajo">Trabajo</option>
+                            <option value="estudios">Estudios</option>
+                            <option value="relaciones">Relaciones</option>
+                            <option value="preferencias">Preferencias</option>
+                            <option value="proyectos">Proyectos</option>
+                            <option value="general">General</option>
+                            <option value="hogar">Hogar</option>
+                            <option value="objetivos">Objetivos</option>
+                            <option value="intereses">Intereses</option>
+                            <option value="tecnica">Técnica</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">Nivel de Acceso:</label>
+                        <select id="edit-mem-level" style="width: 100%; box-sizing: border-box; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.75rem; border-radius: 6px; padding: 6px;">
+                            <option value="general">General (Público)</option>
+                            <option value="personal">Personal (Cifrado AES-GCM)</option>
+                            <option value="muy_privado">Muy Privado (Cifrado + Step-Up)</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size: 0.7rem; color: var(--text-secondary); display: block; margin-bottom: 2px;">Contenido del Recuerdo:</label>
+                    <textarea id="edit-mem-content" class="chat-input" style="width: 100%; height: 90px; box-sizing: border-box; resize: vertical; font-family: inherit; font-size: 0.75rem;" placeholder="Escribe el contenido..."></textarea>
+                </div>
+                <div id="edit-mem-error" style="color: var(--accent-red); font-size: 0.72rem; display: none;"></div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                <button class="btn" onclick="closeEditMemoryModal()">Cancelar</button>
+                <button class="btn btn-center" onclick="saveMemoryEdit()">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Consultar Detalles de Recuerdo (Memory Engine v2.2) -->
+    <div id="view-memory-modal" class="modal-overlay" style="display: none;">
+        <div class="modal" style="max-width: 480px; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                <h3 id="view-mem-title" style="font-size: 1.05rem; color: var(--accent-cyan); margin: 0; display: flex; align-items: center; gap: 6px;">
+                    👁️ Detalle del Recuerdo
+                </h3>
+                <span id="view-mem-level-badge" style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: 700;">NIVEL</span>
+            </div>
+            <input type="hidden" id="view-mem-id">
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-secondary);">
+                    <span>🏷️ Categoría: <strong id="view-mem-category" style="color: var(--text-primary);">-</strong></span>
+                    <span>🆔 ID: <span id="view-mem-id-display" style="font-family: monospace; opacity: 0.8;">-</span></span>
+                </div>
+                <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; min-height: 80px; max-height: 220px; overflow-y: auto;">
+                    <div style="font-size: 0.68rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600;">Contenido:</div>
+                    <div id="view-mem-content" style="font-size: 0.78rem; color: var(--text-primary); line-height: 1.4; white-space: pre-wrap; word-break: break-word;">-</div>
+                </div>
+                <div id="view-mem-lock-warning" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; padding: 8px; font-size: 0.72rem; color: #fca5a5;">
+                    🔒 Este recuerdo es 'muy_privado' (AES-256-GCM). <button class="btn" style="padding: 1px 6px; font-size: 0.65rem; margin-left: 4px;" onclick="openStepupModal()">Desbloquear Step-Up</button>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;">
+                <div style="display: flex; gap: 6px;">
+                    <button class="btn" id="view-mem-btn-edit" style="font-size: 0.72rem; padding: 4px 8px;" onclick="editFromViewModal()">✏️ Editar</button>
+                    <button class="btn" id="view-mem-btn-delete" style="font-size: 0.72rem; padding: 4px 8px; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="deleteFromViewModal()">🗑️ Eliminar</button>
+                </div>
+                <button class="btn btn-center" style="font-size: 0.72rem; padding: 4px 12px;" onclick="closeViewMemoryModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Vista Previa de Importación JSON (Human-in-the-Loop) -->
+    <div id="import-preview-modal" class="modal-overlay" style="display: none;">
+        <div class="modal" style="max-width: 520px; width: 92%; max-height: 85vh; display: flex; flex-direction: column;">
+            <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                <h3 style="font-size: 1.05rem; color: var(--accent-cyan); margin: 0; display: flex; align-items: center; gap: 6px;">
+                    📥 Vista Previa de Importación
+                </h3>
+                <p id="import-preview-summary" style="font-size: 0.75rem; color: var(--text-secondary); margin: 4px 0 0 0; line-height: 1.35;">
+                    Revisa y selecciona los recuerdos que deseas enviar a la cola de revisión. Ninguno se activará sin tu aprobación previa.
+                </p>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px 0;">
+                <label style="font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="import-preview-select-all" checked onchange="toggleSelectAllImportPreview(this.checked)">
+                    <span>Seleccionar todos</span>
+                </label>
+                <span id="import-preview-count" style="font-size: 0.7rem; color: var(--accent-cyan); font-weight: 600;">0 seleccionados</span>
+            </div>
+            <div id="import-preview-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; max-height: 320px; padding-right: 2px;">
+                <!-- Cards dinámicas de recuerdos a importar -->
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 8px;">
+                <button class="btn" onclick="closeImportPreviewModal()">Cancelar</button>
+                <button class="btn btn-center" id="btn-confirm-staged-import" onclick="confirmStagedImport()">
+                    📥 Enviar a Cola de Revisión
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Contenedor Superior Fijo (Cabecera + Barra de Navegación) -->
+    <div class="sticky-top-bar">
+        <header>
+            <div class="brand">
+                <div class="brand-logo">Y</div>
+                <div>
+                    <div class="brand-title">Yedid Smart Hub</div>
+                    <div class="brand-subtitle">Galaxy Fold 7 • Tailscale Mesh</div>
+                </div>
+            </div>
+            <div class="status-pills">
+                <div class="pill" id="pill-approvals" onclick="showApprovalsModal()" style="display: none; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;" title="Ver autorizaciones de alto riesgo pendientes">
+                    <div class="dot" style="background-color: var(--accent-red); box-shadow: 0 0 6px var(--accent-red);"></div>
+                    <span id="approvals-badge">⚠️ 1 Pendiente</span>
+                </div>
+                <div class="pill" onclick="showModelModal()" title="Ver detalles del modelo local">
+                    <div class="dot online" id="ollama-dot"></div>
+                    <span id="ollama-label">Qwen3 8B</span>
+                </div>
+                <div class="pill">
+                    <div class="dot" id="tv-dot"></div>
+                    <span id="tv-label">TV Sala</span>
+                </div>
+                <button class="pill" onclick="emergencyRepairApp()" title="Reparar y Desinfectar Caché PWA" style="color: var(--accent-cyan); font-weight: 700; border-color: rgba(6,182,212,0.4); background: rgba(6,182,212,0.1);">
+                    ↻ v9.0
+                </button>
+            </div>
+        </header>
+
+        <!-- Barra de Navegación Adaptativa para Galaxy Z Fold 7 y Web -->
+        <nav class="main-nav" id="main-nav">
+            <div class="nav-tabs-group">
+                <button class="tab-btn active" data-tab="chat" onclick="switchTab('chat')">💬 Chat</button>
+                <button class="tab-btn" data-tab="scenes" onclick="switchTab('scenes')">🎬 Escenas</button>
+                <button class="tab-btn" data-tab="tv" onclick="switchTab('tv')">📺 Control TV</button>
+                <button class="tab-btn" data-tab="pc" onclick="switchTab('pc')">⚡ PC & Sunshine</button>
+                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory')">🧠 Memoria</button>
+                <button class="tab-btn" data-tab="history" onclick="switchTab('history')">📜 Historial</button>
+            </div>
+            <button class="btn-mode-toggle" id="btn-view-mode" onclick="toggleViewMode()" title="Alternar entre modo Pestañas individuales y Dashboard completo">
+                <span id="mode-icon">📊</span> <span id="mode-text">Dashboard</span>
+            </button>
+        </nav>
+    </div>
+
+    <div class="container">
+
+        <!-- Sidebar / Pestañas de Dispositivos y Telemetría -->
+        <div class="sidebar">
+
+            <!-- Control Remoto TV (Tab: tv) -->
+            <div class="card tab-content" id="tab-tv">
+                <div class="card-header">
+                    <span class="card-title">📺 ONN TV Sala</span>
+                    <button class="btn btn-power" id="btn-tv-power" onclick="toggleTVPower()">⏻ Encender</button>
+                </div>
+                <div class="tv-status-badge" id="tv-app-badge">Estado: Verificando...</div>
+
+                <div class="remote-dpad">
+                    <div></div>
+                    <button class="btn" onclick="sendTVKey('DPAD_UP')">▲</button>
+                    <div></div>
+                    <button class="btn" onclick="sendTVKey('DPAD_LEFT')">◀</button>
+                    <button class="btn btn-center" onclick="sendTVKey('DPAD_CENTER')">OK</button>
+                    <button class="btn" onclick="sendTVKey('DPAD_RIGHT')">▶</button>
+                    <div></div>
+                    <button class="btn" onclick="sendTVKey('DPAD_DOWN')">▼</button>
+                    <div></div>
+                </div>
+
+                <div class="remote-actions">
+                    <button class="btn" onclick="sendTVKey('BACK')">↩ Atrás</button>
+                    <button class="btn" onclick="sendTVKey('HOME')">🏠 Home</button>
+                    <button class="btn" onclick="sendTVKey('PLAY_PAUSE')">⏯ Pausa</button>
+                    <button class="btn" onclick="sendTVKey('VOLUME_DOWN')">🔉 Vol -</button>
+                    <button class="btn" onclick="sendTVKey('MUTE')">🔇 Mute</button>
+                    <button class="btn" onclick="sendTVKey('VOLUME_UP')">🔊 Vol +</button>
+                </div>
+
+                <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">ACCESO DIRECTO A APPS</div>
+                <div class="remote-apps">
+                    <button class="btn btn-app" onclick="launchApp('youtube')">▶ YouTube</button>
+                    <button class="btn btn-app" onclick="launchApp('netflix')">🎬 Netflix</button>
+                    <button class="btn btn-app" onclick="launchApp('prime')">📦 Prime Video</button>
+                    <button class="btn btn-app" onclick="launchApp('disney')">✨ Disney+</button>
+                    <button class="btn btn-app" onclick="launchApp('spotify')">🎵 Spotify</button>
+                    <button class="btn btn-app" onclick="launchApp('tailscale')">🔒 Tailscale</button>
+                </div>
+            </div>
+
+            <!-- Telemetría PC (Tab: pc) -->
+            <div class="card tab-content" id="tab-pc">
+                <div class="card-header">
+                    <span class="card-title">⚡ PC Yedid-Host-PC</span>
+                    <span style="font-size: 0.72rem; color: var(--accent-green);" id="sunshine-badge">Sunshine Activo</span>
+                </div>
+
+                <div>
+                    <div class="metric-row">
+                        <span>CPU (Ryzen 5 5600X)</span>
+                        <span id="cpu-val">0%</span>
+                    </div>
+                    <div class="metric-bar-bg">
+                        <div class="metric-bar-fill" id="cpu-bar"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="metric-row">
+                        <span>Memoria RAM</span>
+                        <span id="ram-val">-- GB libres</span>
+                    </div>
+                    <div class="metric-bar-bg">
+                        <div class="metric-bar-fill" id="ram-bar"></div>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; font-size: 0.76rem; color: var(--text-secondary);">
+                    <span id="disk-c-val">Disco C: --</span>
+                    <span id="disk-d-val">Disco D: --</span>
+                </div>
+
+                <!-- Sección de Optimización de Recursos y RAM para Juegos / Sunshine -->
+                <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 6px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan); text-transform: uppercase;">🧠 Recursos & Memoria IA</span>
+                        <span id="resource-active-profile-badge" style="font-size: 0.68rem; padding: 2px 6px; border-radius: 4px; background: rgba(6,182,212,0.15); color: var(--accent-cyan); font-weight: 600;">Equilibrado</span>
+                    </div>
+
+                    <!-- Botones de Perfiles (3 perfiles) -->
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+                        <button class="btn btn-profile active" id="btn-profile-equilibrado" onclick="switchResourceProfile('equilibrado')" title="LLM 3 min, Whisper 1 min" style="font-size: 0.72rem; padding: 6px 4px; flex-direction: column; gap: 2px;">
+                            <span>⚖️ Equilibrado</span>
+                            <span style="font-size: 0.6rem; color: var(--text-secondary);">3m LLM / 1m Voz</span>
+                        </button>
+                        <button class="btn btn-profile" id="btn-profile-gaming" onclick="switchResourceProfile('gaming')" title="Descarga rápida sin precargas para Sunshine/Moonlight" style="font-size: 0.72rem; padding: 6px 4px; flex-direction: column; gap: 2px;">
+                            <span>🎮 Gaming</span>
+                            <span style="font-size: 0.6rem; color: var(--text-secondary);">VRAM Libre Juegos</span>
+                        </button>
+                        <button class="btn btn-profile" id="btn-profile-rapido" onclick="switchResourceProfile('rapido')" title="LLM 10 min caliente en memoria" style="font-size: 0.72rem; padding: 6px 4px; flex-direction: column; gap: 2px;">
+                            <span>⚡ Rápido</span>
+                            <span style="font-size: 0.6rem; color: var(--text-secondary);">10m LLM Caliente</span>
+                        </button>
+                    </div>
+
+                    <!-- Estado detallado de Modelos en Memoria -->
+                    <div id="resource-models-box" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; font-size: 0.75rem; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: var(--text-secondary);">Ollama LLM:</span>
+                            <span id="ollama-models-loaded-status" style="font-weight: 600; color: #86efac;">💤 En reposo (0 MB)</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: var(--text-secondary);">Whisper (Voz):</span>
+                            <span id="whisper-loaded-status" style="font-weight: 600; color: #86efac;">💤 En reposo (0 MB)</span>
+                        </div>
+                        <div id="resource-tasks-count" style="font-size: 0.68rem; color: var(--text-secondary); text-align: right;">0 tareas en curso</div>
+                    </div>
+
+                    <!-- Acciones manuales de liberación y precarga -->
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn" style="flex: 1; font-size: 0.74rem; padding: 6px; background: rgba(239,68,68,0.12); color: #fca5a5; border-color: rgba(239,68,68,0.3);" onclick="forceUnloadResources()" title="Descarga inmediata de modelos ociosos">
+                            🧹 Liberar RAM Ahora
+                        </button>
+                        <button class="btn" id="btn-preload-model" style="flex: 1; font-size: 0.74rem; padding: 6px; background: rgba(6,182,212,0.12); color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);" onclick="preloadModel()" title="Precargar Qwen3 para interacción rápida">
+                            🔥 Precargar Qwen3
+                        </button>
+                    </div>
+
+                    <!-- Yedid Agent Bridge Status Card -->
+                    <div id="bridge-status-box" style="margin-top: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 600; font-size: 0.78rem; display: flex; align-items: center; gap: 4px;">
+                                🌉 Yedid Agent Bridge
+                            </span>
+                            <span id="bridge-status-badge" style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; background: rgba(148,163,184,0.2); color: #94a3b8;">
+                                Desconectado
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary);">
+                            <span>Canal: <strong id="bridge-repo-display" style="color: var(--text-primary); font-size: 0.68rem;">jaimezabala1992/yedid</strong></span>
+                            <span>Tareas: <strong id="bridge-tasks-count" style="color: var(--accent-cyan);">0</strong></span>
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-top: 2px;">
+                            <button class="btn" id="btn-toggle-bridge" style="flex: 1; font-size: 0.72rem; padding: 5px;" onclick="toggleBridgePause()">
+                                ⏸️ Pausar Bridge
+                            </button>
+                            <button class="btn" style="font-size: 0.72rem; padding: 5px 8px;" onclick="loadBridgeStatus()" title="Actualizar estado del Bridge">
+                                ↻
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Historial de Acciones (Tab: history) -->
+            <div class="card tab-content" id="tab-history">
+                <div class="card-header">
+                    <span class="card-title">📜 Historial de Acciones</span>
+                    <button class="btn" style="padding: 3px 8px; font-size: 0.7rem;" onclick="fetchActionHistory()">↻</button>
+                </div>
+                <div class="action-feed" id="action-feed">
+                    <div style="color: var(--text-secondary); text-align: center; padding: 10px;">Cargando historial...</div>
+                </div>
+            </div>
+
+            <!-- Escenas Domóticas (Tab: scenes) -->
+            <div class="card tab-content" id="tab-scenes">
+                <div class="card-header">
+                    <span class="card-title">🎬 Escenas y Rutinas</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                    <button class="btn btn-app" style="padding: 12px 6px; flex-direction: column; gap: 4px;" onclick="runScene('modo_cine')">
+                        <span style="font-size: 1.3rem;">🍿</span>
+                        <strong>Modo Cine</strong>
+                        <span style="font-size: 0.68rem; color: var(--text-secondary);">TV + Netflix</span>
+                    </button>
+                    <button class="btn btn-app" style="padding: 12px 6px; flex-direction: column; gap: 4px;" onclick="runScene('modo_gaming')">
+                        <span style="font-size: 1.3rem;">🎮</span>
+                        <strong>Modo Gaming</strong>
+                        <span style="font-size: 0.68rem; color: var(--text-secondary);">Sunshine + TV</span>
+                    </button>
+                    <button class="btn btn-app" style="padding: 12px 6px; flex-direction: column; gap: 4px;" onclick="runScene('modo_musica')">
+                        <span style="font-size: 1.3rem;">🎵</span>
+                        <strong>Modo Música</strong>
+                        <span style="font-size: 0.68rem; color: var(--text-secondary);">TV + Spotify</span>
+                    </button>
+                    <button class="btn btn-app" style="padding: 12px 6px; flex-direction: column; gap: 4px;" onclick="runScene('modo_noche')">
+                        <span style="font-size: 1.3rem;">🌙</span>
+                        <strong>Buenas Noches</strong>
+                        <span style="font-size: 0.68rem; color: var(--text-secondary);">Apagar todo</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Motor de Memoria y Privacidad v2.2 (Tab: memory) -->
+            <div class="card tab-content" id="tab-memory">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="card-title">🧠 Memoria & Privacidad v2.2</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="btn" style="padding: 3px 7px; font-size: 0.68rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" onclick="toggleNewMemoryForm()" title="Crear nuevo recuerdo directamente">➕ Nuevo</button>
+                        <button class="btn" style="padding: 3px 7px; font-size: 0.68rem; background: rgba(16,185,129,0.15); color: #86efac;" onclick="exportMemoriesJSON()" title="Exportar recuerdos en JSON yedid_memory_seed/1.0">📤 Exportar</button>
+                        <button class="btn" style="padding: 3px 7px; font-size: 0.68rem;" onclick="refreshMemoryView()" title="Actualizar vista">↻</button>
+                    </div>
+                </div>
+
+                <!-- Resumen de estado de memoria -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
+                    <div style="background: var(--bg-secondary); padding: 6px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 0.68rem; color: var(--text-secondary);">Total</div>
+                        <strong id="mem-stat-total" style="font-size: 1rem; color: var(--text-primary);">0</strong>
+                    </div>
+                    <div style="background: var(--bg-secondary); padding: 6px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 0.68rem; color: var(--accent-orange);">Pendientes</div>
+                        <strong id="mem-stat-pending" style="font-size: 1rem; color: var(--accent-orange);">0</strong>
+                    </div>
+                    <div style="background: var(--bg-secondary); padding: 6px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <div style="font-size: 0.68rem; color: var(--accent-green);">Activos</div>
+                        <strong id="mem-stat-active" style="font-size: 1rem; color: var(--accent-green);">0</strong>
+                    </div>
+                </div>
+
+                <!-- Banner Step-Up para Recuerdos Muy Privados con Temporizador -->
+                <div id="stepup-status-banner" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span id="stepup-banner-text" style="color: #fca5a5;">🔒 Recuerdos 'muy_privado' protegidos con AES-GCM</span>
+                        <span id="stepup-timer-badge" style="display: none; font-size: 0.68rem; background: rgba(16,185,129,0.25); color: #86efac; padding: 1px 5px; border-radius: 4px; font-weight: 700;">15:00</span>
+                    </div>
+                    <button class="btn" id="btn-stepup-toggle" style="padding: 4px 8px; font-size: 0.72rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" onclick="openStepupModal()">
+                        Desbloquear
+                    </button>
+                </div>
+
+                <!-- Botón Principal: Crear Nuevo Recuerdo (Destacado para Galaxy Z Fold 7 y Web) -->
+                <button class="btn btn-center" id="btn-show-new-memory" style="width: 100%; padding: 10px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); border: 1px solid var(--accent-cyan); border-radius: 8px; box-sizing: border-box;" onclick="toggleNewMemoryForm()">
+                    ➕ Nuevo Recuerdo
+                </button>
+
+                <!-- Formulario Plegable: Crear Recuerdo Directo -->
+                <div id="card-new-memory" style="display: none; background: var(--bg-secondary); border: 1px solid var(--accent-cyan); border-radius: 8px; padding: 10px; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong style="font-size: 0.78rem; color: var(--accent-cyan);">➕ Nuevo Recuerdo Directo</strong>
+                        <button class="btn" style="padding: 1px 6px; font-size: 0.65rem;" onclick="toggleNewMemoryForm()">✕</button>
+                    </div>
+                    <input type="text" id="new-mem-title" class="chat-input" placeholder="Título (ej. Preferencias de juego, Médico)..." style="font-size: 0.72rem; padding: 4px 6px; box-sizing: border-box; width: 100%;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <select id="new-mem-category" style="background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.7rem; border-radius: 4px; padding: 4px;">
+                            <option value="preferencias">Preferencias</option>
+                            <option value="hogar">Hogar</option>
+                            <option value="familia">Familia</option>
+                            <option value="salud">Salud</option>
+                            <option value="finanzas">Finanzas</option>
+                            <option value="trabajo">Trabajo</option>
+                            <option value="estudios">Estudios</option>
+                            <option value="relaciones">Relaciones</option>
+                            <option value="proyectos">Proyectos</option>
+                            <option value="objetivos">Objetivos</option>
+                            <option value="intereses">Intereses</option>
+                            <option value="tecnica">Técnica</option>
+                            <option value="general">General</option>
+                        </select>
+                        <select id="new-mem-level" style="background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.7rem; border-radius: 4px; padding: 4px;">
+                            <option value="personal">Personal (Cifrado AES-GCM)</option>
+                            <option value="muy_privado">Muy Privado (Cifrado + Step-Up)</option>
+                            <option value="general">General (Público)</option>
+                        </select>
+                    </div>
+                    <textarea id="new-mem-content" class="chat-input" placeholder="Contenido del recuerdo..." style="height: 60px; font-size: 0.72rem; padding: 4px 6px; resize: vertical; box-sizing: border-box; width: 100%;"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                        <button class="btn btn-center" style="font-size: 0.72rem; padding: 4px 10px;" onclick="saveDirectNewMemory()">Guardar en Memoria</button>
+                    </div>
+                    <div id="new-mem-feedback" style="font-size: 0.7rem; display: none;"></div>
+                </div>
+
+                <!-- Sección: Importar Archivo yedid_memory_seed/1.0 -->
+                <div style="background: var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 0.78rem; font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                        📥 Importador de Memoria Privada (Local-First)
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35;">
+                        Carga tu archivo JSON <code>yedid_memory_seed/1.0</code>. Incluye vista previa interactiva antes de enviar a la cola de revisión humana.
+                    </div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="file" id="input-memory-file" accept=".json" onchange="previewMemorySeedFile(event)" style="font-size: 0.72rem; color: var(--text-secondary); flex: 1;">
+                        <button class="btn btn-center" style="font-size: 0.72rem; padding: 5px 10px;" onclick="document.getElementById('input-memory-file').click()">
+                            Examinar y Previsualizar
+                        </button>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 2px;">
+                        <a href="/static/semilla_prueba_ficticia_v2_2.json" download="semilla_prueba_ficticia_v2_2.json" style="text-decoration: none; font-size: 0.68rem; color: var(--accent-cyan); display: inline-flex; align-items: center; gap: 4px;">
+                            📄 Descargar archivo de prueba ficticio (.json)
+                        </a>
+                    </div>
+                    <div id="memory-import-feedback" style="font-size: 0.72rem; display: none;"></div>
+                </div>
+
+                <!-- Sección: Cola de Revisión Humana (PENDING_REVIEW) -->
+                <div id="memory-pending-section" style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.78rem; font-weight: 700; color: var(--accent-orange);">⏳ Revisión Humana Pendiente</span>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="btn" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(16,185,129,0.15); color: #86efac;" onclick="batchReviewMemories('approve')">Aprobar Todo</button>
+                            <button class="btn" style="padding: 2px 6px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="batchReviewMemories('discard')">Descartar Todo</button>
+                        </div>
+                    </div>
+                    <div id="memory-pending-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto;">
+                        <div style="color: var(--text-secondary); font-size: 0.72rem; text-align: center; padding: 6px;">No hay recuerdos pendientes de revisión.</div>
+                    </div>
+                </div>
+
+                <!-- Sección: Buscador Contextual y Explorador de Recuerdos Activos -->
+                <div style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-color); padding-top: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.78rem; font-weight: 700; color: var(--text-primary);">📚 Recuerdos Activos</span>
+                        <select id="select-mem-category" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.7rem; border-radius: 4px; padding: 2px 4px;" onchange="loadActiveMemories()">
+                            <option value="">Todas las categorías</option>
+                            <option value="familia">Familia</option>
+                            <option value="salud">Salud</option>
+                            <option value="finanzas">Finanzas</option>
+                            <option value="trabajo">Trabajo</option>
+                            <option value="estudios">Estudios</option>
+                            <option value="relaciones">Relaciones</option>
+                            <option value="preferencias">Preferencias</option>
+                            <option value="proyectos">Proyectos</option>
+                            <option value="general">General</option>
+                            <option value="hogar">Hogar</option>
+                            <option value="objetivos">Objetivos</option>
+                            <option value="intereses">Intereses</option>
+                            <option value="tecnica">Técnica</option>
+                        </select>
+                    </div>
+
+                    <!-- Búsqueda Contextual FTS5 -->
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" id="input-mem-search" class="chat-input" style="flex: 1; padding: 4px 8px; font-size: 0.72rem; box-sizing: border-box;" placeholder="🔍 Buscar recuerdos (FTS5 contextual)..." oninput="debounceMemorySearch()">
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.7rem;" onclick="clearMemorySearch()" title="Limpiar búsqueda">✕</button>
+                    </div>
+
+                    <div id="memory-active-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;">
+                        <div style="color: var(--text-secondary); font-size: 0.72rem; text-align: center; padding: 6px;">Cargando recuerdos...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Chat Central con Yedid (Tab: chat) -->
+        <div class="chat-section tab-content active" id="tab-chat">
+            <div class="chat-header">
+                <span style="font-size: 0.82rem; font-weight: 600; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                    🤖 Asistente Yedid (Qwen3 8B)
+                </span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="btn" id="btn-tts-toggle" style="padding: 3px 6px; font-size: 0.72rem;" onclick="toggleTTS()" title="Activar/Desactivar lectura por voz">
+                        🔊 Voz: ON
+                    </button>
+                    <button class="btn btn-center" style="padding: 3px 8px; font-size: 0.72rem;" onclick="createNewConversation()" title="Iniciar nueva conversación en SQLite">
+                        ➕ Nueva
+                    </button>
+                </div>
+            </div>
+
+            <!-- Barra de Selección de Conversación Persistente (SQLite) -->
+            <div id="conversation-bar" style="display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); font-size: 0.74rem;">
+                <span style="color: var(--text-secondary); white-space: nowrap;">💬 Sesión:</span>
+                <select id="select-conversation" style="flex: 1; min-width: 0; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.72rem; border-radius: 4px; padding: 3px 6px;" onchange="switchConversation(this.value)">
+                    <option value="">Cargando conversaciones...</option>
+                </select>
+                <button class="btn" style="padding: 3px 6px; font-size: 0.7rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="deleteCurrentConversation()" title="Eliminar conversación actual">
+                    🗑️
+                </button>
+                <button class="btn" style="padding: 3px 6px; font-size: 0.7rem;" onclick="loadConversations()" title="Recargar conversaciones">
+                    ↻
+                </button>
+            </div>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message assistant">
+                    <div class="avatar assistant">Y</div>
+                    <div class="bubble">
+                        ¡Hola Jaime! Soy <strong>Yedid</strong>. Tu entorno está listo y optimizado para tu Galaxy Fold 7. Puedo controlar la TV, supervisar la PC y gestionar tus agentes locales (Codex y Gemini CLI). ¿En qué te ayudo?
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sugerencias rápidas -->
+            <div class="suggestion-chips">
+                <div class="chip" onclick="sendQuickPrompt('Yedid, ¿qué tareas tengo pendientes en Codex y cuáles puede continuar Gemini?')">🤖 Tareas Codex / Gemini</div>
+                <div class="chip" onclick="sendQuickPrompt('¿Qué está haciendo Gemini?')">🔍 ¿Qué hace Gemini?</div>
+                <div class="chip" onclick="sendQuickPrompt('Muéstrame el progreso de los agentes')">📊 Estado Agentes</div>
+                <div class="chip" onclick="sendQuickPrompt('¿Cómo está la tele de la sala?')">📺 Estado TV</div>
+                <div class="chip" onclick="sendQuickPrompt('¿Cómo está la computadora y Sunshine?')">⚡ Estado PC</div>
+            </div>
+
+            <!-- Input de Chat -->
+            <div class="chat-input-area">
+                <button class="btn btn-icon btn-mic" id="btn-mic" onclick="toggleVoiceInput()" title="Dictar por voz">🎤</button>
+                <input type="text" class="chat-input" id="chat-input" placeholder="Habla o escribe a Yedid..." onkeydown="handleInputKey(event)">
+                <button class="btn btn-icon btn-center" id="btn-send" onclick="sendChatMessage()" title="Enviar mensaje">➤</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+
+        // Gestión de Autenticación por Sesión HttpOnly + CSRF (Cero almacenamiento de tokens en localStorage)
+        let currentCsrfToken = "";
+
+        // Limpiar tokens heredados en localStorage para garantizar higiene criptográfica
+        try { localStorage.removeItem('yedid_token'); } catch (e) {}
+
+        async function checkAuth() {
+            try {
+                // Si la URL contiene ?token=..., intentar login inmediato y limpiar URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlToken = urlParams.get('token');
+                if (urlToken) {
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    await performLoginWithToken(urlToken);
+                    return;
+                }
+
+                const res = await fetch(`${API_URL}/api/auth/me`, { credentials: 'same-origin' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.authenticated) {
+                        currentCsrfToken = data.csrf_token || "";
+                        document.getElementById('auth-modal').style.display = 'none';
+                        fetchHealthAndStatus();
+                        fetchActionHistory();
+                        fetchPendingApprovals();
+                        loadBridgeStatus();
+                        await loadConversations();
+                        return;
+                    }
+                }
+
+                const isTailscaleOrLocal = window.location.hostname.endsWith('.ts.net') || 
+                                           window.location.hostname === 'localhost' || 
+                                           window.location.hostname === '127.0.0.1';
+                if (isTailscaleOrLocal) {
+                    try {
+                        const autoLoginRes = await fetch(`${API_URL}/api/auth/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ token: '' })
+                        });
+                        if (autoLoginRes.ok) {
+                            const autoData = await autoLoginRes.json();
+                            if (autoData.success && autoData.csrf_token) {
+                                currentCsrfToken = autoData.csrf_token;
+                                document.getElementById('auth-modal').style.display = 'none';
+                                fetchHealthAndStatus();
+                                fetchActionHistory();
+                                fetchPendingApprovals();
+                                loadBridgeStatus();
+                                await loadConversations();
+                                return;
+                            }
+                        }
+                    } catch (eAuto) {
+                        console.warn("Auto-login error:", eAuto);
+                    }
+                }
+
+                document.getElementById('auth-modal').style.display = 'flex';
+            } catch (e) {
+                console.warn("Fallo comprobando sesión:", e);
+                const isTailscaleOrLocal = window.location.hostname.endsWith('.ts.net') || 
+                                           window.location.hostname === 'localhost' || 
+                                           window.location.hostname === '127.0.0.1';
+                if (!isTailscaleOrLocal) {
+                    document.getElementById('auth-modal').style.display = 'flex';
+                }
+            }
+        }
+
+        async function performLoginWithToken(tokenVal) {
+            const btn = document.getElementById('btn-login-submit');
+            if (btn) btn.innerText = 'Verificando...';
+            try {
+                const res = await fetch(`${API_URL}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ token: tokenVal })
+                });
+                const data = await res.json();
+                if (data.success && data.csrf_token) {
+                    currentCsrfToken = data.csrf_token;
+                    document.getElementById('auth-modal').style.display = 'none';
+                    const errEl = document.getElementById('login-error');
+                    if (errEl) errEl.style.display = 'none';
+                    fetchHealthAndStatus();
+                    fetchActionHistory();
+                    fetchPendingApprovals();
+                    loadBridgeStatus();
+                    await loadConversations();
+                } else {
+                    showLoginError(data.detail || "Clave o token incorrecto.");
+                }
+            } catch (e) {
+                showLoginError("Error conectando con el servidor Yedid.");
+            } finally {
+                if (btn) btn.innerText = 'Iniciar Sesión Segura';
+            }
+        }
+
+        async function performLogin() {
+            const val = document.getElementById('input-token').value.trim();
+            if (!val) {
+                showLoginError("Por favor ingresa la clave de acceso.");
+                return;
+            }
+            await performLoginWithToken(val);
+        }
+
+        function showLoginError(msg) {
+            const errEl = document.getElementById('login-error');
+            if (errEl) {
+                errEl.innerText = msg;
+                errEl.style.display = 'block';
+            }
+        }
+
+        async function authenticatedFetch(url, options = {}) {
+            options.credentials = 'same-origin';
+            const headers = options.headers || {};
+            const method = (options.method || 'GET').toUpperCase();
+
+            // Adjuntar token CSRF para cualquier operación mutante (POST, PUT, DELETE, PATCH)
+            if (currentCsrfToken && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                headers['X-CSRF-Token'] = currentCsrfToken;
+            }
+            options.headers = headers;
+
+            const res = await fetch(url, options);
+            if (res.status === 401 || res.status === 403) {
+                const isTailscaleOrLocal = window.location.hostname.endsWith('.ts.net') || 
+                                           window.location.hostname === 'localhost' || 
+                                           window.location.hostname === '127.0.0.1';
+                if (!isTailscaleOrLocal) {
+                    document.getElementById('auth-modal').style.display = 'flex';
+                } else {
+                    checkAuth();
+                }
+            }
+            return res;
+        }
+
+        // Estado del modo de visualización: 'tabs' (por defecto, óptimo para Fold y móvil) o 'dashboard'
+        let currentViewMode = sessionStorage.getItem('yedid_view_mode') || 'tabs';
+
+        function applyViewMode(mode) {
+            currentViewMode = mode;
+            sessionStorage.setItem('yedid_view_mode', mode);
+            const body = document.body;
+            const btnText = document.getElementById('mode-text');
+            const btnIcon = document.getElementById('mode-icon');
+
+            if (mode === 'dashboard') {
+                body.classList.add('mode-dashboard');
+                if (btnText) btnText.innerText = 'Pestañas';
+                if (btnIcon) btnIcon.innerText = '📑';
+            } else {
+                body.classList.remove('mode-dashboard');
+                if (btnText) btnText.innerText = 'Dashboard';
+                if (btnIcon) btnIcon.innerText = '📊';
+            }
+        }
+
+        function toggleViewMode() {
+            const nextMode = currentViewMode === 'tabs' ? 'dashboard' : 'tabs';
+            applyViewMode(nextMode);
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab) {
+                const tabKey = activeTab.getAttribute('data-tab') || 'chat';
+                switchTab(tabKey);
+            }
+        }
+
+        // Navegación adaptable para Galaxy Z Fold 7 y Web
+        function switchTab(tabId) {
+            // Desmarcar todos los botones de pestañas
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+
+            // Marcar el botón activo correspondiente
+            const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`) ||
+                Array.from(document.querySelectorAll('.tab-btn')).find(b => {
+                    const clickAttr = b.getAttribute('onclick') || '';
+                    return clickAttr.includes(`'${tabId}'`) || clickAttr.includes(`"${tabId}"`);
+                });
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+            }
+
+            const target = document.getElementById(`tab-${tabId}`);
+            if (!target) return;
+
+            // Refrescar inmediatamente telemetría y datos de la pestaña seleccionada
+            if (tabId === 'pc') {
+                fetchHealthAndStatus();
+            } else if (tabId === 'history') {
+                fetchActionHistory();
+            } else if (tabId === 'tv') {
+                fetchHealthAndStatus();
+            } else if (tabId === 'memory') {
+                refreshMemoryView();
+            } else if (tabId === 'chat') {
+                loadConversations();
+                fetchPendingApprovals();
+            }
+
+            if (currentViewMode === 'dashboard') {
+                // Modo Dashboard: todos los paneles están en pantalla; desplazar suavemente al seleccionado
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('tab-highlighted'));
+                target.classList.add('tab-highlighted');
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                // Modo Pestañas (Default): mostrar exclusivamente la sección seleccionada y desplazar al tope
+                document.querySelectorAll('.tab-content').forEach(el => {
+                    el.classList.remove('active');
+                    el.classList.remove('tab-highlighted');
+                });
+                target.classList.add('active');
+                window.scrollTo({ top: 0, behavior: 'instant' });
+            }
+        }
+
+        function triggerEmergencyRecovery(reason) {
+            const banner = document.getElementById('emergency-recovery-banner');
+            const desc = document.getElementById('emergency-error-desc');
+            if (banner) {
+                if (desc && reason) desc.innerText = reason;
+                banner.style.display = 'block';
+            }
+        }
+
+        async function emergencyRepairApp() {
+            console.log("Ejecutando desinfección y reparación de emergencia de PWA...");
+            try {
+                if ('serviceWorker' in navigator) {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    for (const reg of registrations) {
+                        console.log("Purgando Service Worker:", reg.scope);
+                        await reg.unregister();
+                    }
+                }
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    for (const key of keys) {
+                        console.log("Purgando CacheStorage:", key);
+                        await caches.delete(key);
+                    }
+                }
+                sessionStorage.clear();
+                localStorage.removeItem('yedid_view_mode');
+            } catch (e) {
+                console.warn("Error en reparación de PWA:", e);
+            }
+            window.location.href = window.location.pathname + '?repaired=' + Date.now();
+        }
+
+        const forceAppRefresh = emergencyRepairApp;
+
+        // Sistema de Aprobación Humana (HITL) para Operaciones de Alto Riesgo
+        async function fetchPendingApprovals() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/approvals/pending`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const list = data.pending_approvals || [];
+                    const pill = document.getElementById('pill-approvals');
+                    const badge = document.getElementById('approvals-badge');
+                    if (pill && badge) {
+                        if (list.length > 0) {
+                            pill.style.display = 'flex';
+                            badge.innerText = `⚠️ ${list.length} Pendiente${list.length > 1 ? 's' : ''}`;
+                        } else {
+                            pill.style.display = 'none';
+                        }
+                    }
+                    renderApprovalsModal(list);
+                }
+            } catch (e) {
+                console.warn("Error consultando aprobaciones:", e);
+            }
+        }
+
+        function renderApprovalsModal(list) {
+            const container = document.getElementById('approvals-list');
+            if (!container) return;
+            if (list.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-secondary); text-align: center; padding: 10px;">No hay solicitudes pendientes en este momento.</div>';
+                return;
+            }
+            container.innerHTML = list.map(item => {
+                const params = item.params || {};
+                const taskId = item.task_id || params.task_id || item.action || 'N/D';
+                const agentName = item.agent || params.agent || item.requester || 'sistema';
+                const scopePath = item.scope || params.project_path || params.allowed_project_path || 'Sistema Local';
+                const riskLabel = item.risk_label || item.risk_level || 'ALTO (HIGH)';
+                const instructionText = item.instruction || params.instruction || item.description || '';
+                return `
+                <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <strong style="color: var(--accent-orange); font-size: 0.82rem;">⚡ Tarea: <span style="font-family: monospace;">${taskId}</span> (${agentName})</strong>
+                        <span style="font-size: 0.68rem; background: rgba(239, 68, 68, 0.22); color: #fca5a5; padding: 2px 7px; border-radius: 4px; font-weight: 700;">⚠️ Riesgo: ${riskLabel}</span>
+                    </div>
+                    <div style="font-size: 0.74rem; color: var(--accent-cyan); word-break: break-all;">
+                        📁 <strong>Alcance:</strong> <span style="font-family: monospace;">${scopePath}</span>
+                    </div>
+                    <div style="font-size: 0.76rem; color: var(--text-primary); line-height: 1.35;">
+                        📝 <strong>Instrucción:</strong> ${instructionText}
+                    </div>
+                    <div style="font-size: 0.66rem; color: var(--text-secondary);">ID Aprobación: <span style="font-family: monospace;">${item.id}</span></div>
+                    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
+                        <button class="btn" style="padding: 5px 10px; font-size: 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" onclick="resolveApproval('${item.id}', 'reject')">❌ Rechazar</button>
+                        <button class="btn btn-center" style="padding: 5px 12px; font-size: 0.75rem;" onclick="resolveApproval('${item.id}', 'approve')">✅ Autorizar y Ejecutar</button>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        async function resolveApproval(id, resolution) {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/approvals/${id}/${resolution}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    await fetchPendingApprovals();
+                    fetchActionHistory();
+                    if (currentConversationId) {
+                        await loadConversationMessages(currentConversationId);
+                        await refreshConversationSelector(currentConversationId);
+                        setTimeout(() => {
+                            if (currentConversationId) {
+                                loadConversationMessages(currentConversationId);
+                                refreshConversationSelector(currentConversationId);
+                            }
+                        }, 2000);
+                    }
+                } else {
+                    alert("Error procesando resolución de autorización.");
+                }
+            } catch (e) {
+                alert("Error de red: " + e);
+            }
+        }
+
+        function showApprovalsModal() {
+            document.getElementById('approvals-modal').style.display = 'flex';
+            fetchPendingApprovals();
+        }
+
+        // Actualización Periódica de Telemetría
+        async function fetchHealthAndStatus() {
+            try {
+                // TV Status
+                const tvRes = await authenticatedFetch(`${API_URL}/api/tv/status`);
+                if (tvRes.ok) {
+                    const tvData = await tvRes.json();
+                    const tvDot = document.getElementById('tv-dot');
+                    const tvPowerBtn = document.getElementById('btn-tv-power');
+                    const tvAppBadge = document.getElementById('tv-app-badge');
+
+                    if (tvData.success && tvData.is_on) {
+                        tvDot.className = 'dot online';
+                        tvPowerBtn.className = 'btn btn-power is-on';
+                        tvPowerBtn.innerText = '⏻ Apagar';
+                        tvAppBadge.innerText = `App: ${tvData.current_app || 'Encendida'}`;
+                    } else {
+                        tvDot.className = 'dot offline';
+                        tvPowerBtn.className = 'btn btn-power';
+                        tvPowerBtn.innerText = '⏻ Encender';
+                        tvAppBadge.innerText = 'Estado: En reposo / Apagada';
+                    }
+                }
+
+                // PC Vitals
+                const vitalsRes = await authenticatedFetch(`${API_URL}/api/system/vitals`);
+                if (vitalsRes.ok) {
+                    const vitals = await vitalsRes.json();
+                    if (vitals && !vitals.error) {
+                        document.getElementById('cpu-val').innerText = `${vitals.cpu_percent}%`;
+                        document.getElementById('cpu-bar').style.width = `${vitals.cpu_percent}%`;
+
+                        document.getElementById('ram-val').innerText = `${vitals.ram.free_gb} GB libres (${vitals.ram.percent_used}%)`;
+                        document.getElementById('ram-bar').style.width = `${vitals.ram.percent_used}%`;
+
+                        document.getElementById('disk-c-val').innerText = `C: ${vitals.disk_c.free_gb} GB libres`;
+                        if (vitals.disk_d) {
+                            document.getElementById('disk-d-val').innerText = `D: ${vitals.disk_d.free_gb} GB libres`;
+                        }
+                        document.getElementById('sunshine-badge').innerText = `Sunshine: ${vitals.sunshine_gaming_server}`;
+                    }
+                }
+
+                // Consultar telemetría de modelos y gestión de recursos RAM/VRAM
+                await fetchResourceStatus();
+            } catch (err) {
+                console.error("Error actualizando telemetría:", err);
+            }
+        }
+
+        // Gestión Inteligente de Recursos y Memoria (LLM & Whisper)
+        async function fetchResourceStatus() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/resources/status`);
+                if (res.ok) {
+                    const data = await res.json();
+                    renderResourceStatus(data);
+                }
+            } catch (e) {
+                console.warn("Error consultando estado de recursos:", e);
+            }
+        }
+
+        function renderResourceStatus(data) {
+            // 1. Perfil Activo
+            const activeProfile = data.active_profile || 'equilibrado';
+            const badge = document.getElementById('resource-active-profile-badge');
+            if (badge) {
+                badge.innerText = data.profile_details ? data.profile_details.name : activeProfile;
+            }
+
+            // Actualizar botones de perfil
+            ['equilibrado', 'gaming', 'rapido'].forEach(p => {
+                const btn = document.getElementById(`btn-profile-${p}`);
+                if (btn) {
+                    if (p === activeProfile) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                }
+            });
+
+            // 2. Estado de Modelos Ollama
+            const ollamaStatus = document.getElementById('ollama-models-loaded-status');
+            const ollamaDot = document.getElementById('ollama-dot');
+            const ollamaLabel = document.getElementById('ollama-label');
+
+            const loadedModels = (data.llm && data.llm.models) ? data.llm.models : [];
+            if (loadedModels.length > 0) {
+                const m = loadedModels[0];
+                if (ollamaStatus) {
+                    ollamaStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 ${m.name} (${m.size_mb} MB)</span>`;
+                }
+                if (ollamaDot) ollamaDot.className = 'dot online';
+                if (ollamaLabel) ollamaLabel.innerText = `${m.name} (${m.size_mb} MB)`;
+            } else {
+                if (ollamaStatus) {
+                    ollamaStatus.innerHTML = `<span style="color: #86efac;">💤 En reposo (0 MB en VRAM)</span>`;
+                }
+                if (ollamaDot) ollamaDot.className = 'dot offline';
+                if (ollamaLabel) ollamaLabel.innerText = 'Qwen3 (En Reposo)';
+            }
+
+            // 3. Estado de Whisper
+            const whisperStatus = document.getElementById('whisper-loaded-status');
+            if (whisperStatus) {
+                if (data.whisper && data.whisper.is_loaded) {
+                    const idleStr = data.whisper.idle_seconds != null ? ` [inactivo ${data.whisper.idle_seconds}s]` : '';
+                    whisperStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 Activo (${data.whisper.ram_mb} MB)${idleStr}</span>`;
+                } else {
+                    whisperStatus.innerHTML = `<span style="color: #86efac;">💤 En reposo (0 MB en RAM)</span>`;
+                }
+            }
+
+            // 4. Conteo de tareas en curso
+            const tasksCount = document.getElementById('resource-tasks-count');
+            if (tasksCount) {
+                const totalActive = data.active_tasks_total || 0;
+                tasksCount.innerText = totalActive > 0 ? `⚡ ${totalActive} tarea(s) en ejecución activa` : '0 tareas en curso (Listo para reposo)';
+            }
+
+            // 5. Deshabilitar precarga si estamos en gaming
+            const preloadBtn = document.getElementById('btn-preload-model');
+            if (preloadBtn) {
+                if (activeProfile === 'gaming') {
+                    preloadBtn.disabled = true;
+                    preloadBtn.style.opacity = '0.5';
+                    preloadBtn.title = 'Precarga desactivada en perfil Gaming para proteger VRAM';
+                } else {
+                    preloadBtn.disabled = false;
+                    preloadBtn.style.opacity = '1';
+                    preloadBtn.title = 'Precargar Qwen3 en memoria';
+                }
+            }
+        }
+
+        async function switchResourceProfile(profile) {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/resources/profile`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile: profile })
+                });
+                if (res.ok) {
+                    await fetchResourceStatus();
+                } else {
+                    alert("Error cambiando perfil de recursos.");
+                }
+            } catch (e) {
+                console.error("Error al cambiar perfil:", e);
+            }
+        }
+
+        async function forceUnloadResources() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/resources/unload`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    await fetchResourceStatus();
+                    fetchActionHistory();
+                }
+            } catch (e) {
+                console.error("Error liberando recursos:", e);
+            }
+        }
+
+        async function preloadModel() {
+            const btn = document.getElementById('btn-preload-model');
+            if (btn) btn.innerText = 'Cargando...';
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/resources/preload`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    await fetchResourceStatus();
+                }
+            } catch (e) {
+                console.error("Error precargando modelo:", e);
+            } finally {
+                if (btn) btn.innerText = '🔥 Precargar Qwen3';
+            }
+        }
+
+        // =========================================================================
+        // Yedid Memory Engine v2.2 — Privacidad, Importación y Step-Up
+        // =========================================================================
+        // =========================================================================
+        // Yedid Memory Engine v2.2 — Privacidad, Importación y Step-Up
+        // =========================================================================
+        let currentStepupToken = sessionStorage.getItem('yedid_stepup_token') || null;
+        let stepupTimerInterval = null;
+
+        function startStepupTimer(durationSeconds) {
+            if (stepupTimerInterval) clearInterval(stepupTimerInterval);
+            const timerBadge = document.getElementById('stepup-timer-badge');
+            if (timerBadge) timerBadge.style.display = 'inline-block';
+
+            let remaining = Math.max(0, Math.floor(durationSeconds));
+            const updateDisplay = () => {
+                if (remaining <= 0) {
+                    if (stepupTimerInterval) clearInterval(stepupTimerInterval);
+                    currentStepupToken = null;
+                    sessionStorage.removeItem('yedid_stepup_token');
+                    sessionStorage.removeItem('yedid_stepup_expires_at');
+                    if (timerBadge) timerBadge.style.display = 'none';
+                    updateStepupUI(false);
+                    refreshMemoryView();
+                    return;
+                }
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                if (timerBadge) {
+                    timerBadge.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                }
+                remaining--;
+            };
+            updateDisplay();
+            stepupTimerInterval = setInterval(updateDisplay, 1000);
+        }
+
+        function checkInitialStepupState() {
+            if (currentStepupToken) {
+                const expiresAt = parseInt(sessionStorage.getItem('yedid_stepup_expires_at') || '0', 10);
+                const now = Date.now();
+                if (expiresAt > now) {
+                    const remainingSecs = Math.floor((expiresAt - now) / 1000);
+                    updateStepupUI(true);
+                    startStepupTimer(remainingSecs);
+                } else {
+                    currentStepupToken = null;
+                    sessionStorage.removeItem('yedid_stepup_token');
+                    sessionStorage.removeItem('yedid_stepup_expires_at');
+                    updateStepupUI(false);
+                }
+            } else {
+                updateStepupUI(false);
+            }
+        }
+
+        function openStepupModal() {
+            document.getElementById('input-stepup-secret').value = '';
+            document.getElementById('stepup-error').style.display = 'none';
+            document.getElementById('stepup-modal').style.display = 'flex';
+            setTimeout(() => {
+                const inp = document.getElementById('input-stepup-secret');
+                if (inp) inp.focus();
+            }, 100);
+        }
+
+        async function performStepupAuth() {
+            const secret = document.getElementById('input-stepup-secret').value.trim();
+            const errDiv = document.getElementById('stepup-error');
+            if (!secret) return;
+
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/memory/stepup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ secret: secret })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    currentStepupToken = data.stepup_token;
+                    sessionStorage.setItem('yedid_stepup_token', currentStepupToken);
+                    const ttl = data.expires_in_seconds || 900;
+                    sessionStorage.setItem('yedid_stepup_expires_at', (Date.now() + ttl * 1000).toString());
+                    document.getElementById('stepup-modal').style.display = 'none';
+                    updateStepupUI(true);
+                    startStepupTimer(ttl);
+                    refreshMemoryView();
+                } else {
+                    errDiv.innerText = "Credencial de paso elevado incorrecta.";
+                    errDiv.style.display = 'block';
+                }
+            } catch (e) {
+                errDiv.innerText = "Error de conexión: " + e;
+                errDiv.style.display = 'block';
+            }
+        }
+
+        function updateStepupUI(isUnlocked) {
+            const banner = document.getElementById('stepup-status-banner');
+            const text = document.getElementById('stepup-banner-text');
+            const btn = document.getElementById('btn-stepup-toggle');
+            const timerBadge = document.getElementById('stepup-timer-badge');
+
+            if (isUnlocked) {
+                if (banner) {
+                    banner.style.background = 'rgba(16, 185, 129, 0.15)';
+                    banner.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+                }
+                if (text) text.innerHTML = '<span style="color: #86efac;">🔓 Modo Muy Privado Desbloqueado</span>';
+                if (btn) {
+                    btn.innerText = 'Bloquear';
+                    btn.style.background = 'rgba(16, 185, 129, 0.2)';
+                    btn.style.color = '#86efac';
+                    btn.onclick = async () => {
+                        const tokenToRevoke = currentStepupToken;
+                        if (stepupTimerInterval) clearInterval(stepupTimerInterval);
+                        currentStepupToken = null;
+                        sessionStorage.removeItem('yedid_stepup_token');
+                        sessionStorage.removeItem('yedid_stepup_expires_at');
+                        if (timerBadge) timerBadge.style.display = 'none';
+                        updateStepupUI(false);
+                        if (tokenToRevoke) {
+                            try {
+                                await authenticatedFetch(`${API_URL}/api/memory/stepup/revoke`, {
+                                    method: 'POST',
+                                    headers: { 'X-Stepup-Token': tokenToRevoke }
+                                });
+                            } catch (e) {
+                                console.warn("Error revocando step-up en servidor:", e);
+                            }
+                        }
+                        refreshMemoryView();
+                    };
+                }
+            } else {
+                if (stepupTimerInterval) clearInterval(stepupTimerInterval);
+                if (timerBadge) timerBadge.style.display = 'none';
+                if (banner) {
+                    banner.style.background = 'rgba(239, 68, 68, 0.1)';
+                    banner.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                }
+                if (text) text.innerHTML = '<span style="color: #fca5a5;">🔒 Recuerdos "muy_privado" protegidos con AES-GCM</span>';
+                if (btn) {
+                    btn.innerText = 'Desbloquear';
+                    btn.style.background = 'rgba(239, 68, 68, 0.2)';
+                    btn.style.color = '#fca5a5';
+                    btn.onclick = openStepupModal;
+                }
+            }
+        }
+
+        // --- Creación Directa de Recuerdos ---
+        function toggleNewMemoryForm() {
+            const card = document.getElementById('card-new-memory');
+            if (!card) return;
+            if (card.style.display === 'none' || card.style.display === '') {
+                card.style.display = 'flex';
+                const inp = document.getElementById('new-mem-title');
+                if (inp) inp.focus();
+            } else {
+                card.style.display = 'none';
+                const fb = document.getElementById('new-mem-feedback');
+                if (fb) fb.style.display = 'none';
+            }
+        }
+
+        async function saveDirectNewMemory() {
+            const titleEl = document.getElementById('new-mem-title');
+            const catEl = document.getElementById('new-mem-category');
+            const lvlEl = document.getElementById('new-mem-level');
+            const contentEl = document.getElementById('new-mem-content');
+            const feedback = document.getElementById('new-mem-feedback');
+
+            const title = titleEl ? titleEl.value.trim() : '';
+            const category = catEl ? catEl.value : 'preferencias';
+            const access_level = lvlEl ? lvlEl.value : 'personal';
+            const content = contentEl ? contentEl.value.trim() : '';
+
+            if (!title || !content) {
+                feedback.style.color = 'var(--accent-red)';
+                feedback.innerText = 'El título y el contenido son obligatorios.';
+                feedback.style.display = 'block';
+                return;
+            }
+
+            feedback.style.color = 'var(--text-secondary)';
+            feedback.innerText = 'Guardando recuerdo...';
+            feedback.style.display = 'block';
+
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/memory/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title,
+                        category: category,
+                        access_level: access_level,
+                        content: content,
+                        validity: 'permanent',
+                        status: 'ACTIVE'
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    feedback.style.color = 'var(--accent-green)';
+                    feedback.innerText = '✅ Recuerdo guardado correctamente.';
+                    titleEl.value = '';
+                    contentEl.value = '';
+                    setTimeout(() => {
+                        toggleNewMemoryForm();
+                        refreshMemoryView();
+                    }, 800);
+                } else {
+                    feedback.style.color = 'var(--accent-red)';
+                    feedback.innerText = `❌ Error: ${data.detail || 'No se pudo guardar'}`;
+                }
+            } catch (e) {
+                feedback.style.color = 'var(--accent-red)';
+                feedback.innerText = `❌ Error de red: ${e}`;
+            }
+        }
+
+        // --- Consulta y Detalle de Recuerdos (Memory Engine v2.2) ---
+        async function viewMemoryDetail(id) {
+            const modal = document.getElementById('view-memory-modal');
+            const warnEl = document.getElementById('view-mem-lock-warning');
+            if (warnEl) warnEl.style.display = 'none';
+
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+                const res = await authenticatedFetch(`${API_URL}/api/memory/${id}`, { headers });
+                if (res.ok) {
+                    const mem = await res.json();
+                    document.getElementById('view-mem-id').value = mem.id;
+                    document.getElementById('view-mem-id-display').innerText = mem.id;
+                    document.getElementById('view-mem-title').innerHTML = `👁️ ${mem.title || 'Sin Título'}`;
+                    document.getElementById('view-mem-category').innerText = mem.category || 'general';
+
+                    const badge = document.getElementById('view-mem-level-badge');
+                    const lvl = mem.access_level || 'general';
+                    badge.innerText = lvl;
+                    if (lvl === 'muy_privado') {
+                        badge.style.background = 'rgba(239, 68, 68, 0.25)';
+                        badge.style.color = '#fca5a5';
+                    } else if (lvl === 'personal') {
+                        badge.style.background = 'rgba(6, 182, 212, 0.25)';
+                        badge.style.color = 'var(--accent-cyan)';
+                    } else {
+                        badge.style.background = 'rgba(16, 185, 129, 0.25)';
+                        badge.style.color = '#86efac';
+                    }
+
+                    const contentEl = document.getElementById('view-mem-content');
+                    if (mem.locked || (mem.content && mem.content.includes("REQUIERE_REAUTENTICACION_STEPUP"))) {
+                        contentEl.innerText = "[Contenido cifrado con AES-256-GCM. Requiere verificación Step-Up para descifrar]";
+                        if (warnEl) warnEl.style.display = 'block';
+                    } else {
+                        contentEl.innerText = mem.content || '(Vacío)';
+                    }
+
+                    modal.style.display = 'flex';
+                } else {
+                    const err = await res.json();
+                    if (res.status === 403 && err.detail && err.detail.includes("step-up")) {
+                        openStepupModal();
+                        alert("Este recuerdo es 'muy_privado'. Ingresa tu clave en el modal de verificación para verlo.");
+                    } else {
+                        alert(err.detail || "Error obteniendo detalles del recuerdo.");
+                    }
+                }
+            } catch (e) {
+                alert("Error de red consultando recuerdo: " + e);
+            }
+        }
+
+        function closeViewMemoryModal() {
+            const modal = document.getElementById('view-memory-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function editFromViewModal() {
+            const id = document.getElementById('view-mem-id').value;
+            closeViewMemoryModal();
+            if (id) openEditMemoryModal(id);
+        }
+
+        function deleteFromViewModal() {
+            const id = document.getElementById('view-mem-id').value;
+            closeViewMemoryModal();
+            if (id) deleteMemory(id);
+        }
+
+        // --- Edición y Corrección de Recuerdos ---
+        async function openEditMemoryModal(id) {
+            const modal = document.getElementById('edit-memory-modal');
+            const errDiv = document.getElementById('edit-mem-error');
+            if (errDiv) errDiv.style.display = 'none';
+
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+                const res = await authenticatedFetch(`${API_URL}/api/memory/${id}`, { headers });
+                if (res.ok) {
+                    const mem = await res.json();
+                    document.getElementById('edit-mem-id').value = mem.id;
+                    document.getElementById('edit-mem-title').value = mem.title || '';
+                    document.getElementById('edit-mem-category').value = mem.category || 'general';
+                    document.getElementById('edit-mem-level').value = mem.access_level || 'general';
+                    document.getElementById('edit-mem-content').value = mem.content || '';
+                    modal.style.display = 'flex';
+                } else {
+                    const err = await res.json();
+                    if (res.status === 403 && err.detail && err.detail.includes("step-up")) {
+                        openStepupModal();
+                        alert("Modificar este recuerdo clasificado como 'muy_privado' requiere reautenticación de paso elevado (Step-Up).");
+                    } else {
+                        alert(err.detail || "Error obteniendo recuerdo para editar.");
+                    }
+                }
+            } catch (e) {
+                alert("Error al cargar recuerdo: " + e);
+            }
+        }
+
+        function closeEditMemoryModal() {
+            const modal = document.getElementById('edit-memory-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        async function saveMemoryEdit() {
+            const id = document.getElementById('edit-mem-id').value;
+            const title = document.getElementById('edit-mem-title').value.trim();
+            const category = document.getElementById('edit-mem-category').value;
+            const access_level = document.getElementById('edit-mem-level').value;
+            const content = document.getElementById('edit-mem-content').value.trim();
+            const errDiv = document.getElementById('edit-mem-error');
+
+            if (!title || !content) {
+                errDiv.innerText = "El título y contenido no pueden estar vacíos.";
+                errDiv.style.display = 'block';
+                return;
+            }
+
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+
+                const res = await authenticatedFetch(`${API_URL}/api/memory/${id}`, {
+                    method: 'PUT',
+                    headers: headers,
+                    body: JSON.stringify({
+                        title: title,
+                        content: content,
+                        category: category,
+                        access_level: access_level
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    closeEditMemoryModal();
+                    refreshMemoryView();
+                } else {
+                    if (res.status === 403 && data.detail && data.detail.includes("Step-Up")) {
+                        closeEditMemoryModal();
+                        openStepupModal();
+                        alert("Para guardar cambios en un recuerdo 'muy_privado' debes autenticarte en Step-Up primero.");
+                    } else {
+                        errDiv.innerText = data.detail || "Error al actualizar recuerdo.";
+                        errDiv.style.display = 'block';
+                    }
+                }
+            } catch (e) {
+                errDiv.innerText = "Error de red: " + e;
+                errDiv.style.display = 'block';
+            }
+        }
+
+        async function deleteMemory(id) {
+            if (!confirm("¿Eliminar este recuerdo de forma definitiva?")) return;
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+
+                const res = await authenticatedFetch(`${API_URL}/api/memory/${id}`, {
+                    method: 'DELETE',
+                    headers: headers
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    refreshMemoryView();
+                } else {
+                    if (res.status === 403 && data.detail && data.detail.includes("Step-Up")) {
+                        openStepupModal();
+                        alert("Para eliminar un recuerdo 'muy_privado' debes autenticarte en Step-Up primero.");
+                    } else {
+                        alert(data.detail || "Error eliminando recuerdo.");
+                    }
+                }
+            } catch (e) {
+                alert("Error eliminando recuerdo: " + e);
+            }
+        }
+
+        // --- Exportador JSON yedid_memory_seed/1.0 ---
+        async function exportMemoriesJSON() {
+            if (currentStepupToken) {
+                const confirmed = confirm(
+                    "⚠️ ADVERTENCIA DE SEGURIDAD:\n\n" +
+                    "Tu sesión tiene Step-Up activo. El archivo JSON que vas a descargar contendrá recuerdos clasificados como 'muy_privado' (salud, finanzas, familia) en texto sin cifrar para respaldo offline.\n\n" +
+                    "¿Deseas continuar con la descarga de esta información confidencial?"
+                );
+                if (!confirmed) return;
+            } else {
+                const proceed = confirm(
+                    "ℹ️ Exportación de Respaldo Offline:\n\n" +
+                    "Se descargarán los recuerdos generales y personales. Los recuerdos 'muy_privado' se excluirán automáticamente por seguridad al no tener Step-Up activo.\n\n" +
+                    "¿Continuar con la descarga?"
+                );
+                if (!proceed) return;
+            }
+
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+                const res = await authenticatedFetch(`${API_URL}/api/memory/export`, { headers });
+                if (res.ok) {
+                    const data = await res.json();
+                    const jsonString = JSON.stringify(data, null, 2);
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const now = new Date();
+                    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `yedid_memory_export_${dateStr}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    const err = await res.json();
+                    alert(`Error exportando recuerdos: ${err.detail || 'Fallo desconocido'}`);
+                }
+            } catch (e) {
+                alert(`Error al exportar: ${e}`);
+            }
+        }
+
+        // --- Búsqueda Contextual FTS5 ---
+        let memorySearchTimeout = null;
+        function debounceMemorySearch() {
+            if (memorySearchTimeout) clearTimeout(memorySearchTimeout);
+            memorySearchTimeout = setTimeout(() => {
+                loadActiveMemories();
+            }, 300);
+        }
+
+        function clearMemorySearch() {
+            const input = document.getElementById('input-mem-search');
+            if (input) input.value = '';
+            loadActiveMemories();
+        }
+
+        // --- Vista Previa Interactiva e Importación Staged (Human-in-the-Loop) ---
+        let stagedImportData = null;
+
+        function previewMemorySeedFile(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (!parsed || !Array.isArray(parsed.memories)) {
+                        alert("El archivo JSON no tiene un formato válido. Debe contener un array 'memories'.");
+                        event.target.value = '';
+                        return;
+                    }
+
+                    stagedImportData = parsed;
+                    renderImportPreviewModal(parsed);
+                    document.getElementById('import-preview-modal').style.display = 'flex';
+                } catch (err) {
+                    alert("Error al leer el archivo JSON: " + err.message);
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function renderImportPreviewModal(data) {
+            const listContainer = document.getElementById('import-preview-list');
+            const summaryEl = document.getElementById('import-preview-summary');
+            const memories = data.memories || [];
+
+            summaryEl.innerText = `Se detectaron ${memories.length} recuerdos en "${data.schema || 'yedid_memory_seed/1.0'}". Marca los que deseas enviar a revisión humana:`;
+
+            listContainer.innerHTML = memories.map((item, idx) => {
+                const lvl = item.access_level || 'personal';
+                let badgeBg = 'rgba(16, 185, 129, 0.2)';
+                let badgeColor = '#86efac';
+                if (lvl === 'muy_privado') {
+                    badgeBg = 'rgba(239, 68, 68, 0.2)';
+                    badgeColor = '#fca5a5';
+                } else if (lvl === 'personal') {
+                    badgeBg = 'rgba(6, 182, 212, 0.2)';
+                    badgeColor = 'var(--accent-cyan)';
+                }
+
+                return `
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; gap: 8px; align-items: flex-start;">
+                        <input type="checkbox" class="import-preview-cb" data-index="${idx}" checked onchange="updateImportPreviewCount()" style="margin-top: 3px; cursor: pointer;">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
+                                <strong style="font-size: 0.76rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.title || 'Sin Título'}</strong>
+                                <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600; flex-shrink: 0;">${lvl}</span>
+                            </div>
+                            <div style="font-size: 0.68rem; color: var(--text-secondary); margin-top: 2px; line-height: 1.3; max-height: 40px; overflow: hidden; text-overflow: ellipsis;">${item.content || ''}</div>
+                            <div style="font-size: 0.62rem; color: var(--text-secondary); margin-top: 2px;">🏷️ ${item.category || 'general'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('import-preview-select-all').checked = true;
+            updateImportPreviewCount();
+        }
+
+        function toggleSelectAllImportPreview(checked) {
+            document.querySelectorAll('.import-preview-cb').forEach(cb => {
+                cb.checked = checked;
+            });
+            updateImportPreviewCount();
+        }
+
+        function updateImportPreviewCount() {
+            const allCbs = document.querySelectorAll('.import-preview-cb');
+            const checkedCbs = document.querySelectorAll('.import-preview-cb:checked');
+            const countEl = document.getElementById('import-preview-count');
+            const confirmBtn = document.getElementById('btn-confirm-staged-import');
+
+            if (countEl) countEl.innerText = `${checkedCbs.length} de ${allCbs.length} seleccionados`;
+            if (confirmBtn) confirmBtn.disabled = checkedCbs.length === 0;
+        }
+
+        function closeImportPreviewModal() {
+            const modal = document.getElementById('import-preview-modal');
+            if (modal) modal.style.display = 'none';
+            const fileInput = document.getElementById('input-memory-file');
+            if (fileInput) fileInput.value = '';
+            stagedImportData = null;
+        }
+
+        async function confirmStagedImport() {
+            if (!stagedImportData || !stagedImportData.memories) {
+                alert("No hay datos de importación disponibles.");
+                return;
+            }
+
+            const checkedBoxes = Array.from(document.querySelectorAll('.import-preview-cb:checked'));
+            if (checkedBoxes.length === 0) {
+                alert("Debes seleccionar al menos un recuerdo para enviar a la cola de revisión.");
+                return;
+            }
+
+            const selectedIndices = new Set(checkedBoxes.map(cb => parseInt(cb.getAttribute('data-index'), 10)));
+            const selectedMemories = stagedImportData.memories.filter((_, idx) => selectedIndices.has(idx));
+
+            const payload = {
+                schema: stagedImportData.schema || "yedid_memory_seed/1.0",
+                source_type: stagedImportData.source_type || "manual_import",
+                exported_at: stagedImportData.exported_at || new Date().toISOString(),
+                total: selectedMemories.length,
+                memories: selectedMemories
+            };
+
+            const confirmBtn = document.getElementById('btn-confirm-staged-import');
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerText = "Importando y cifrando...";
+            }
+
+            const feedback = document.getElementById('memory-import-feedback');
+
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/memory/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                closeImportPreviewModal();
+
+                if (res.ok && data.success) {
+                    if (feedback) {
+                        feedback.style.display = 'block';
+                        feedback.style.color = 'var(--accent-green)';
+                        feedback.innerText = `✅ Éxito: ${data.total_imported} recuerdos enviados a la cola de revisión humana. Ninguno se activó directamente.`;
+                        setTimeout(() => { feedback.style.display = 'none'; }, 6000);
+                    }
+                    refreshMemoryView();
+                } else {
+                    if (feedback) {
+                        feedback.style.display = 'block';
+                        feedback.style.color = 'var(--accent-red)';
+                        feedback.innerText = `❌ Error en importación: ${data.detail || 'Fallo procesando recuerdos'}`;
+                    }
+                    alert(data.detail || "Error en la importación de recuerdos.");
+                }
+            } catch (e) {
+                alert("Error de red durante la importación: " + e);
+            } finally {
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerText = "📥 Enviar a Cola de Revisión";
+                }
+            }
+        }
+
+        async function refreshMemoryView() {
+            await loadMemoryStats();
+            await loadPendingMemories();
+            await loadActiveMemories();
+        }
+
+        async function loadMemoryStats() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/memory/stats`);
+                if (res.ok) {
+                    const stats = await res.json();
+                    document.getElementById('mem-stat-total').innerText = stats.total_memories || 0;
+                    document.getElementById('mem-stat-pending').innerText = stats.pending_count || 0;
+                    document.getElementById('mem-stat-active').innerText = stats.active_count || 0;
+                }
+            } catch (e) {
+                console.error("Error cargando estadísticas de memoria:", e);
+            }
+        }
+
+        async function loadPendingMemories() {
+            const container = document.getElementById('memory-pending-list');
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+
+                const res = await authenticatedFetch(`${API_URL}/api/memory/list?status=PENDING_REVIEW`, { headers });
+                if (res.ok) {
+                    const data = await res.json();
+                    const list = data.memories || [];
+                    if (list.length === 0) {
+                        container.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.72rem; text-align: center; padding: 6px;">No hay recuerdos pendientes de revisión.</div>';
+                        return;
+                    }
+
+                    container.innerHTML = list.map(item => {
+                        const isMuyPrivado = item.access_level === 'muy_privado';
+                        const isPersonal = item.access_level === 'personal';
+                        let badgeBg = 'rgba(16, 185, 129, 0.2)';
+                        let badgeColor = '#86efac';
+                        if (isMuyPrivado) {
+                            badgeBg = 'rgba(239, 68, 68, 0.2)';
+                            badgeColor = '#fca5a5';
+                        } else if (isPersonal) {
+                            badgeBg = 'rgba(6, 182, 212, 0.2)';
+                            badgeColor = 'var(--accent-cyan)';
+                        }
+
+                        return `
+                            <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <strong style="font-size: 0.78rem; color: var(--text-primary);">${item.title}</strong>
+                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${item.access_level}</span>
+                                </div>
+                                <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.35; white-space: pre-wrap; word-break: break-word;">${item.content}</div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${item.category} • <span style="font-size: 0.6rem; opacity: 0.7;">${item.origin || ''}</span></span>
+                                    <div style="display: flex; gap: 4px;">
+                                        <button class="btn" style="padding: 2px 6px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewSingleMemory('${item.id}', 'discard')">❌ Descartar</button>
+                                        <button class="btn btn-center" style="padding: 2px 6px; font-size: 0.68rem;" onclick="reviewSingleMemory('${item.id}', 'approve')">✅ Aprobar</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                container.innerHTML = '<div style="color: var(--accent-red); font-size: 0.72rem;">Error cargando pendientes.</div>';
+            }
+        }
+
+        async function loadActiveMemories(searchQuery) {
+            const container = document.getElementById('memory-active-list');
+            const cat = document.getElementById('select-mem-category').value;
+            const searchInput = document.getElementById('input-mem-search');
+            const q = (searchQuery !== undefined) ? searchQuery : (searchInput ? searchInput.value.trim() : '');
+
+            try {
+                const headers = {};
+                if (currentStepupToken) headers['X-Stepup-Token'] = currentStepupToken;
+
+                let url = `${API_URL}/api/memory/list?status=ACTIVE`;
+                if (cat) url += `&category=${encodeURIComponent(cat)}`;
+                if (q) url += `&query=${encodeURIComponent(q)}`;
+
+                const res = await authenticatedFetch(url, { headers });
+                if (res.ok) {
+                    const data = await res.json();
+                    const list = data.memories || [];
+                    if (list.length === 0) {
+                        container.innerHTML = `<div style="color: var(--text-secondary); font-size: 0.72rem; text-align: center; padding: 6px;">${q ? 'No se encontraron recuerdos coincidentes.' : 'No hay recuerdos activos en esta categoría.'}</div>`;
+                        return;
+                    }
+
+                    container.innerHTML = list.map(item => {
+                        const isMuyPrivado = item.access_level === 'muy_privado';
+                        const isPersonal = item.access_level === 'personal';
+                        const isLocked = item.locked;
+
+                        let badgeBg = 'rgba(16, 185, 129, 0.2)';
+                        let badgeColor = '#86efac';
+                        if (isMuyPrivado) {
+                            badgeBg = 'rgba(239, 68, 68, 0.2)';
+                            badgeColor = '#fca5a5';
+                        } else if (isPersonal) {
+                            badgeBg = 'rgba(6, 182, 212, 0.2)';
+                            badgeColor = 'var(--accent-cyan)';
+                        }
+
+                        return `
+                            <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 3px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <strong style="font-size: 0.76rem; color: var(--text-primary); cursor: pointer;" onclick="viewMemoryDetail('${item.id}')">${item.title}</strong>
+                                    <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${item.access_level}</span>
+                                </div>
+                                <div style="font-size: 0.72rem; color: ${isLocked ? 'var(--accent-orange)' : 'var(--text-secondary)'}; line-height: 1.35; white-space: pre-wrap; word-break: break-word;">
+                                    ${item.content}
+                                    ${isLocked ? ' <button class="btn" style="padding: 1px 5px; font-size: 0.65rem; display: inline-flex;" onclick="openStepupModal()">Desbloquear</button>' : ''}
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 3px;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${item.category} • <span style="font-size: 0.6rem; opacity: 0.7;">${item.id}</span></span>
+                                    <div style="display: flex; gap: 4px;">
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" onclick="viewMemoryDetail('${item.id}')" title="Consultar detalle completo">👁️ Ver</button>
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem;" onclick="openEditMemoryModal('${item.id}')" title="Editar / Corregir recuerdo">✏️ Editar</button>
+                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="deleteMemory('${item.id}')" title="Eliminar recuerdo definitivamente">🗑️ Borrar</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                container.innerHTML = '<div style="color: var(--accent-red); font-size: 0.72rem;">Error cargando recuerdos activos.</div>';
+            }
+        }
+
+        async function reviewSingleMemory(id, action) {
+            try {
+                const body = { action: action };
+                if (currentStepupToken) body.stepup_token = currentStepupToken;
+
+                const res = await authenticatedFetch(`${API_URL}/api/memory/${id}/review`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (res.ok) {
+                    refreshMemoryView();
+                } else {
+                    const err = await res.json();
+                    if (res.status === 403 && err.detail && err.detail.includes("step-up")) {
+                        openStepupModal();
+                    } else {
+                        alert(err.detail || "Error al revisar recuerdo.");
+                    }
+                }
+            } catch (e) {
+                alert("Error de red: " + e);
+            }
+        }
+
+        async function batchReviewMemories(action) {
+            if (!confirm(`¿Estás seguro de que deseas ${action === 'approve' ? 'aprobar' : 'descartar'} todos los recuerdos pendientes?`)) {
+                return;
+            }
+
+            try {
+                const body = { action: action };
+                if (currentStepupToken) body.stepup_token = currentStepupToken;
+
+                const res = await authenticatedFetch(`${API_URL}/api/memory/review_all`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.skipped_very_private > 0) {
+                        alert(`Se procesaron los recuerdos generales/personales. Se omitieron ${data.skipped_very_private} recuerdos 'muy_privado' por requerir verificación de paso elevado.`);
+                    }
+                    refreshMemoryView();
+                }
+            } catch (e) {
+                alert("Error de red: " + e);
+            }
+        }
+
+        // Historial de Acciones
+        async function fetchActionHistory() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/actions/history?limit=10`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const feed = document.getElementById('action-feed');
+                    if (data.actions && data.actions.length > 0) {
+                        feed.innerHTML = data.actions.map(a => {
+                            const timeStr = a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : '';
+                            return `
+                                <div class="action-item">
+                                    <span>${a.description}</span>
+                                    <span style="color: var(--text-secondary); font-size: 0.7rem;">${timeStr}</span>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        feed.innerHTML = `<div style="color: var(--text-secondary); text-align: center; padding: 6px;">Sin acciones registradas aún</div>`;
+                    }
+                }
+            } catch (e) {
+                console.error("Error en historial:", e);
+            }
+        }
+
+        // TV Actions
+        async function toggleTVPower() {
+            const btn = document.getElementById('btn-tv-power');
+            const isCurrentlyOn = btn.classList.contains('is-on');
+            btn.innerText = 'Enviando...';
+            try {
+                await authenticatedFetch(`${API_URL}/api/tv/power`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ power_on: !isCurrentlyOn })
+                });
+                setTimeout(() => { fetchHealthAndStatus(); fetchActionHistory(); }, 1800);
+            } catch (e) {
+                alert("Error al conmutar TV: " + e);
+            }
+        }
+
+        async function sendTVKey(key) {
+            try {
+                await authenticatedFetch(`${API_URL}/api/tv/key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: key })
+                });
+                fetchActionHistory();
+            } catch (e) {
+                console.error("Error enviando tecla:", e);
+            }
+        }
+
+        async function launchApp(app) {
+            try {
+                await authenticatedFetch(`${API_URL}/api/tv/launch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ app: app })
+                });
+                setTimeout(() => { fetchHealthAndStatus(); fetchActionHistory(); }, 2500);
+            } catch (e) {
+                console.error("Error abriendo app:", e);
+            }
+        }
+
+        // Síntesis de Voz (TTS) en español
+        let ttsEnabled = true;
+        function toggleTTS() {
+            ttsEnabled = !ttsEnabled;
+            const btn = document.getElementById('btn-tts-toggle');
+            btn.innerText = ttsEnabled ? '🔊 Voz: ON' : '🔇 Voz: OFF';
+            if (!ttsEnabled && window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+            }
+        }
+
+        async function speakText(text) {
+            if (!ttsEnabled) return;
+            const clean = text.replace(/[*_#`]/g, '').replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+            if (!clean) return;
+
+            try {
+                // Probar síntesis TTS nativa local del Hub (SAPI5 Windows en español)
+                const headers = { 'Content-Type': 'application/json' };
+                if (currentCsrfToken) headers['X-CSRF-Token'] = currentCsrfToken;
+                const res = await fetch(`${API_URL}/api/voice/synthesize`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: headers,
+                    body: JSON.stringify({ text: clean })
+                });
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const audioUrl = URL.createObjectURL(blob);
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                    return;
+                }
+            } catch (err) {
+                console.warn("Fallo síntesis local del hub, usando Web Speech fallback:", err);
+            }
+
+            // Fallback: Web Speech API del navegador en el Fold 7
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(clean);
+                utter.lang = 'es-ES';
+                utter.rate = 1.05;
+                window.speechSynthesis.speak(utter);
+            }
+        }
+
+        // =========================================================================
+        // Persistencia Transaccional de Chat y Motor de Tareas Multiagente (SQLite)
+        // =========================================================================
+        let currentConversationId = localStorage.getItem('yedid_active_conv_id') || '';
+        let _loadMessagesSeq = 0;
+
+        async function refreshConversationSelector(preferredConvId = null) {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/conversations`, { cache: 'no-store' });
+                if (!res.ok) return [];
+                const data = await res.json();
+                const list = data.conversations || [];
+                const sel = document.getElementById('select-conversation');
+                if (!sel) return list;
+
+                if (list.length === 0) {
+                    return [];
+                }
+
+                const targetId = preferredConvId || currentConversationId;
+                if (!targetId || !list.some(c => c.id === targetId)) {
+                    currentConversationId = list[0].id;
+                    localStorage.setItem('yedid_active_conv_id', currentConversationId);
+                } else {
+                    currentConversationId = targetId;
+                    localStorage.setItem('yedid_active_conv_id', currentConversationId);
+                }
+
+                sel.innerHTML = list.map(c => {
+                    const count = typeof c.message_count === 'number' ? c.message_count : 0;
+                    const title = c.title || 'Conversación';
+                    return `<option value="${c.id}" ${c.id === currentConversationId ? 'selected' : ''}>${title} (${count} msgs)</option>`;
+                }).join('');
+                sel.value = currentConversationId;
+                return list;
+            } catch (e) {
+                console.warn("Error sincronizando selector de conversaciones:", e);
+                return [];
+            }
+        }
+
+        async function loadConversations() {
+            try {
+                const list = await refreshConversationSelector(currentConversationId);
+                if (list.length === 0) {
+                    await createNewConversation();
+                    return;
+                }
+                await loadConversationMessages(currentConversationId);
+            } catch (e) {
+                console.warn("Error cargando conversaciones de SQLite:", e);
+            }
+        }
+
+        async function switchConversation(convId) {
+            if (!convId) return;
+            currentConversationId = convId;
+            localStorage.setItem('yedid_active_conv_id', convId);
+            await loadConversationMessages(convId);
+            await refreshConversationSelector(convId);
+        }
+
+        async function createNewConversation() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/conversations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'Nueva Conversación' })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    currentConversationId = data.conversation.id;
+                    localStorage.setItem('yedid_active_conv_id', currentConversationId);
+                    await refreshConversationSelector(currentConversationId);
+                    await loadConversationMessages(currentConversationId);
+                }
+            } catch (e) {
+                alert("Error creando conversación: " + e);
+            }
+        }
+
+        async function deleteCurrentConversation() {
+            if (!currentConversationId) return;
+            if (!confirm("¿Deseas eliminar la conversación actual y su historial de SQLite?")) return;
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/conversations/${currentConversationId}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    currentConversationId = '';
+                    localStorage.removeItem('yedid_active_conv_id');
+                    await loadConversations();
+                }
+            } catch (e) {
+                alert("Error eliminando conversación: " + e);
+            }
+        }
+
+        function renderTaskCardHtml(task) {
+            if (!task) return '';
+            const status = task.status || 'queued';
+            let badgeBg = 'rgba(6, 182, 212, 0.2)';
+            let badgeColor = 'var(--accent-cyan)';
+            let statusLabel = status.toUpperCase();
+
+            if (status === 'completed') {
+                badgeBg = 'rgba(16, 185, 129, 0.2)';
+                badgeColor = '#86efac';
+            } else if (status === 'failed' || status === 'cancelled') {
+                badgeBg = 'rgba(239, 68, 68, 0.2)';
+                badgeColor = '#fca5a5';
+            } else if (status === 'waiting_approval') {
+                badgeBg = 'rgba(245, 158, 11, 0.2)';
+                badgeColor = 'var(--accent-orange)';
+                statusLabel = 'ESPERANDO APROBACIÓN (HITL)';
+            } else if (status === 'interrupted') {
+                badgeBg = 'rgba(234, 179, 8, 0.2)';
+                badgeColor = '#fde047';
+                statusLabel = '⚠️ TAREA INTERRUMPIDA';
+            } else if (status === 'running') {
+                badgeBg = 'rgba(168, 85, 247, 0.2)';
+                badgeColor = 'var(--accent-purple)';
+                statusLabel = 'EJECUTANDO EN SERVIDOR...';
+            }
+
+            let deliverablesHtml = '';
+            const deliverables = task.deliverables || [];
+            if (deliverables.length > 0) {
+                deliverablesHtml = `
+                    <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">
+                        <span style="font-size: 0.65rem; color: #86efac; font-weight: 600;">📁 Evidencia en disco (Entregables):</span>
+                        <ul style="margin: 2px 0 0 14px; padding: 0; font-size: 0.66rem; color: var(--text-secondary);">
+                            ${deliverables.slice(0, 4).map(d => `<li>${d.name} (${d.size_bytes} B)</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            let approvalButtonHtml = '';
+            if (status === 'waiting_approval' && task.approval_id) {
+                approvalButtonHtml = `
+                    <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed rgba(245, 158, 11, 0.25);">
+                        <div style="font-size: 0.64rem; color: var(--accent-orange);">🔒 ID Aprobación: <span style="font-family: monospace;">${task.approval_id}</span></div>
+                        <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 5px;">
+                            <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="resolveApproval('${task.approval_id}', 'reject')">❌ Rechazar</button>
+                            <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="resolveApproval('${task.approval_id}', 'approve')">✅ Autorizar y Ejecutar</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            let resumeButtonHtml = '';
+            if (status === 'interrupted' || status === 'failed') {
+                resumeButtonHtml = `
+                    <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px;">
+                        <button class="btn" style="padding: 3px 10px; font-size: 0.68rem; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); cursor: pointer; border-radius: 4px;" onclick="resumeTask('${task.id}')">🔄 Reanudar Tarea</button>
+                    </div>
+                `;
+            }
+
+            const scopePath = task.project_path || 'C:\\Yedid-Smart-Home\\sandbox';
+            const riskLabel = task.risk_level === 'HIGH' ? 'ALTO (HIGH)' : (task.risk_level || 'BAJO (LOW)');
+
+            return `
+                <div class="chat-task-card" id="task-card-${task.id}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-top: 6px; font-size: 0.72rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px; flex-wrap: wrap;">
+                        <strong style="color: var(--accent-cyan); display: flex; align-items: center; gap: 4px;">
+                            ⚡ Tarea: <span style="font-family: monospace; font-size: 0.68rem;">${task.id}</span>
+                        </strong>
+                        <span style="font-size: 0.62rem; padding: 1px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor}; font-weight: 700;">
+                            ${statusLabel}
+                        </span>
+                    </div>
+                    <div style="color: var(--text-primary); margin-top: 4px; line-height: 1.3;">
+                        ${task.instruction}
+                    </div>
+                    <div style="font-size: 0.65rem; color: var(--accent-cyan); margin-top: 4px; word-break: break-all;">
+                        📁 Alcance: <span style="font-family: monospace;">${scopePath}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-secondary); margin-top: 4px;">
+                        <span>Agente: <strong style="color: var(--text-primary);">${task.agent}</strong></span>
+                        <span>Riesgo: <strong style="color: ${task.risk_level === 'HIGH' ? '#fca5a5' : '#86efac'};">${riskLabel}</strong></span>
+                    </div>
+                    ${deliverablesHtml}
+                    ${approvalButtonHtml}
+                    ${resumeButtonHtml}
+                </div>
+            `;
+        }
+
+        async function resumeTask(taskId) {
+            try {
+                showNotification(`Reanudando tarea ${taskId}...`);
+                const res = await authenticatedFetch(`${API_URL}/api/tasks/${taskId}/resume`, { method: 'POST' });
+                if (res.ok) {
+                    showNotification(`Tarea reanudada en segundo plano.`);
+                    await fetchPendingApprovals();
+                    if (currentConversationId) {
+                        await loadConversationMessages(currentConversationId);
+                        await refreshConversationSelector(currentConversationId);
+                    }
+                } else {
+                    const err = await res.json();
+                    alert("No se pudo reanudar: " + (err.detail || err.error || "Error"));
+                }
+            } catch (e) {
+                alert("Error de conexión al reanudar tarea: " + e);
+            }
+        }
+
+        async function loadConversationMessages(convId) {
+            const container = document.getElementById('chat-messages');
+            if (!container || !convId) return;
+
+            const reqSeq = ++_loadMessagesSeq;
+
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/conversations/${convId}/messages`, { cache: 'no-store' });
+                if (reqSeq !== _loadMessagesSeq) return;
+                if (res.ok) {
+                    const data = await res.json();
+                    if (reqSeq !== _loadMessagesSeq) return;
+                    const messages = data.messages || [];
+                    const tasks = data.tasks || [];
+                    const convMeta = data.conversation || null;
+
+                    // Sincronizar inmediatamente la opción del selector con el conteo real de SQLite
+                    const sel = document.getElementById('select-conversation');
+                    if (sel && convMeta) {
+                        const opt = Array.from(sel.options).find(o => o.value === convId);
+                        const exactCount = typeof convMeta.message_count === 'number' ? convMeta.message_count : messages.length;
+                        const exactTitle = convMeta.title || 'Conversación';
+                        if (opt) {
+                            opt.textContent = `${exactTitle} (${exactCount} msgs)`;
+                        }
+                    }
+
+                    container.innerHTML = '';
+
+                    if (messages.length === 0) {
+                        container.innerHTML = `
+                            <div class="message assistant">
+                                <div class="avatar assistant">Y</div>
+                                <div class="bubble">
+                                    ¡Hola Jaime! Soy <strong>Yedid</strong>. Tu entorno está listo y optimizado para tu Galaxy Fold 7. Puedo controlar la TV, supervisar la PC y gestionar tus agentes locales (Codex y Gemini CLI). ¿En qué te ayudo?
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        messages.forEach(m => {
+                            appendMessage(m.role, m.content, m.tools_called, m.task_id, null, m.created_iso);
+                        });
+                    }
+
+                    // Renderizar tarjetas de tareas activas de la conversación
+                    tasks.forEach(t => {
+                        const existingCard = document.getElementById(`task-card-${t.id}`);
+                        if (existingCard) {
+                            existingCard.outerHTML = renderTaskCardHtml(t);
+                        } else {
+                            const taskCardEl = document.createElement('div');
+                            taskCardEl.innerHTML = renderTaskCardHtml(t);
+                            container.appendChild(taskCardEl.firstElementChild);
+                        }
+                    });
+
+                    // Auto-sondeo reactivo para Galaxy Fold 7 si hay tareas en cola o ejecutándose
+                    if (window._taskPollTimer) {
+                        clearTimeout(window._taskPollTimer);
+                        window._taskPollTimer = null;
+                    }
+                    const hasActiveTasks = tasks.some(t => t.status === 'running' || t.status === 'queued');
+                    if (hasActiveTasks) {
+                        window._taskPollTimer = setTimeout(() => {
+                            if (currentConversationId === convId) {
+                                loadConversationMessages(convId);
+                                refreshConversationSelector(convId);
+                            }
+                        }, 3000);
+                    }
+
+                    container.scrollTop = container.scrollHeight;
+                }
+            } catch (e) {
+                console.warn("Error cargando historial de mensajes:", e);
+            }
+        }
+
+        function formatChatTextHtml(rawText, tools = []) {
+            let safeText = (rawText || '').trim();
+            if (!safeText && tools && tools.length > 0) {
+                const toolNames = tools.map(t => t.tool || 'herramienta').join(', ');
+                safeText = `✅ He ejecutado las herramientas solicitadas (${toolNames}) y verificado el estado real en disco.`;
+            }
+            if (!safeText) return '';
+            // Si el texto ya contiene etiquetas HTML conocidas generadas internamente, respetarlo; de lo contrario, formatear Markdown ligero
+            if (! safeText.includes('<div') && !safeText.includes('<strong')) {
+                safeText = safeText
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>')
+                    .replace(/\n/g, '<br>');
+            }
+            return safeText;
+        }
+
+        // Chat Logic con Integración de Propuestas de Memoria y Tarjetas de Tareas
+        function appendMessage(sender, text, tools = [], taskId = null, taskInfo = null, timestamp = null) {
+            const container = document.getElementById('chat-messages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}`;
+
+            let toolChipsHtml = '';
+            let proposalsHtml = '';
+            if (tools && tools.length > 0) {
+                tools.forEach(t => {
+                    const tName = t.tool || 'herramienta';
+                    toolChipsHtml += `<div class="tool-chip">⚙️ Herramienta: ${tName}</div> `;
+                    if (tName === 'propose_memory_to_save' && t.result) {
+                        const r = t.result;
+                        const memId = r.id;
+                        const title = r.title || 'Nuevo recuerdo';
+                        const category = r.category || 'general';
+                        const level = r.access_level || 'personal';
+                        const content = r.content || '';
+                        proposalsHtml += `
+                            <div class="chat-memory-proposal" id="proposal-${memId}" style="background: rgba(6,182,212,0.12); border: 1px solid var(--accent-cyan); border-radius: 8px; padding: 8px; margin-top: 8px; font-size: 0.74rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <strong style="color: var(--accent-cyan);">🧠 Propuesta de Recuerdo</strong>
+                                    <span style="font-size: 0.62rem; padding: 1px 5px; border-radius: 4px; background: rgba(6,182,212,0.2); color: var(--accent-cyan); text-transform: uppercase; font-weight: 600;">${category} • ${level}</span>
+                                </div>
+                                <div style="margin: 4px 0; color: var(--text-primary); font-weight: 600;">${title}</div>
+                                <div style="font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35; max-height: 60px; overflow-y: auto;">${content}</div>
+                                <div style="display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end;">
+                                    <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewMemoryFromChat('${memId}', 'discard', this)">❌ Descartar</button>
+                                    <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="reviewMemoryFromChat('${memId}', 'approve', this)">✅ Aprobar y Activar</button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+            }
+
+            let taskCardHtml = '';
+            if (taskInfo) {
+                taskCardHtml = renderTaskCardHtml(taskInfo);
+            }
+
+            let timeLabel = '';
+            if (timestamp) {
+                try {
+                    const d = new Date(timestamp);
+                    timeLabel = `<span style="font-size: 0.62rem; color: var(--text-secondary); opacity: 0.7; float: right; margin-left: 8px;">${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+                } catch (e) {}
+            }
+
+            const formattedBody = formatChatTextHtml(text, tools);
+
+            msgDiv.innerHTML = `
+                <div class="avatar ${sender}">${sender === 'assistant' ? 'Y' : 'J'}</div>
+                <div class="bubble">
+                    ${timeLabel}
+                    <div style="line-height: 1.42;">${formattedBody}</div>
+                    ${toolChipsHtml ? `<div style="margin-top: 6px;">${toolChipsHtml}</div>` : ''}
+                    ${proposalsHtml}
+                    ${taskCardHtml}
+                </div>
+            `;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendChatMessage(customText = null) {
+            const input = document.getElementById('chat-input');
+            const text = (customText || input.value).trim();
+            if (!text) return;
+
+            input.value = '';
+            appendMessage('user', text);
+
+            const sendBtn = document.getElementById('btn-send');
+            sendBtn.disabled = true;
+
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant typing-placeholder';
+            typingDiv.innerHTML = `<div class="avatar assistant">Y</div><div class="bubble" style="opacity: 0.7;">Pensando con Qwen3...</div>`;
+            document.getElementById('chat-messages').appendChild(typingDiv);
+            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+
+            const clientMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+            try {
+                const chatPayload = {
+                    message: text,
+                    conversation_id: currentConversationId || undefined,
+                    client_message_id: clientMsgId
+                };
+                if (currentStepupToken) {
+                    chatPayload.stepup_token = currentStepupToken;
+                }
+                const res = await authenticatedFetch(`${API_URL}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chatPayload)
+                });
+                const data = await res.json();
+                typingDiv.remove();
+
+                if (data.conversation_id) {
+                    currentConversationId = data.conversation_id;
+                    localStorage.setItem('yedid_active_conv_id', currentConversationId);
+                }
+
+                appendMessage('assistant', data.reply, data.tools_executed, null, data.task);
+
+                // Sincronizar siempre el selector y contador de mensajes con SQLite tras cada turno
+                await refreshConversationSelector(currentConversationId);
+
+                // Si se encoló una tarea duradera de ejecución inmediata, activar sondeo automático
+                if (data.task && (data.task.status === 'queued' || data.task.status === 'running')) {
+                    if (window._taskPollTimer) clearTimeout(window._taskPollTimer);
+                    window._taskPollTimer = setTimeout(() => {
+                        if (currentConversationId) {
+                            loadConversationMessages(currentConversationId);
+                            refreshConversationSelector(currentConversationId);
+                        }
+                    }, 2500);
+                }
+
+                speakText(data.reply);
+                fetchHealthAndStatus();
+                fetchActionHistory();
+                fetchPendingApprovals();
+            } catch (err) {
+                typingDiv.remove();
+                appendMessage('assistant', `⚠️ Error al comunicar con Yedid: ${err.message}`);
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        async function resetChat() {
+            await createNewConversation();
+        }
+
+        function sendQuickPrompt(promptText) {
+            sendChatMessage(promptText);
+        }
+
+        function handleInputKey(event) {
+            if (event.key === 'Enter') {
+                sendChatMessage();
+            }
+        }
+
+        // Ejecución de Escenas Domóticas
+        async function runScene(name) {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/scenes/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scene: name })
+                });
+                const data = await res.json();
+                if (data.message) {
+                    appendMessage('assistant', `✨ **${data.message}**`);
+                    speakText(data.message);
+                } else if (data.error) {
+                    appendMessage('assistant', `⚠️ ${data.error}`);
+                }
+                setTimeout(() => { fetchHealthAndStatus(); fetchActionHistory(); }, 2000);
+            } catch (e) {
+                alert("Error ejecutando escena: " + e);
+            }
+        }
+
+        // Reconocimiento de Voz: Whisper 100% Local con fallback a Web Speech API
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recognition = null;
+
+        async function toggleVoiceInput() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                if (isRecording) {
+                    stopWhisperRecording();
+                } else {
+                    startWhisperRecording();
+                }
+            } else {
+                toggleWebSpeechAPI();
+            }
+        }
+
+        async function startWhisperRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    stream.getTracks().forEach(t => t.stop());
+
+                    const typingDiv = document.createElement('div');
+                    typingDiv.className = 'message assistant typing-placeholder';
+                    typingDiv.innerHTML = `<div class="avatar assistant">Y</div><div class="bubble" style="opacity: 0.7;">Transcribiendo con Whisper Local...</div>`;
+                    document.getElementById('chat-messages').appendChild(typingDiv);
+                    document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+
+                    const formData = new FormData();
+                    formData.append('file', audioBlob, 'voice.webm');
+
+                    try {
+                        const headers = {};
+                        if (currentCsrfToken) headers['X-CSRF-Token'] = currentCsrfToken;
+
+                        const res = await fetch(`${API_URL}/api/voice/transcribe`, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: headers,
+                            body: formData
+                        });
+                        const data = await res.json();
+                        typingDiv.remove();
+                        if (data.text) {
+                            sendChatMessage(data.text);
+                        } else {
+                            toggleWebSpeechAPI();
+                        }
+                    } catch (err) {
+                        typingDiv.remove();
+                        console.error("Fallo Whisper local:", err);
+                        toggleWebSpeechAPI();
+                    }
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('btn-mic').classList.add('recording');
+            } catch (err) {
+                console.warn("Fallo MediaRecorder, usando Web Speech:", err);
+                toggleWebSpeechAPI();
+            }
+        }
+
+        function stopWhisperRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('btn-mic').classList.remove('recording');
+            }
+        }
+
+        function toggleWebSpeechAPI() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Tu navegador no soporta entrada de audio.");
+                return;
+            }
+            if (!recognition) {
+                recognition = new SpeechRecognition();
+                recognition.lang = 'es-ES';
+                recognition.continuous = false;
+                recognition.interimResults = false;
+
+                recognition.onstart = () => {
+                    isRecording = true;
+                    document.getElementById('btn-mic').classList.add('recording');
+                };
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    document.getElementById('chat-input').value = transcript;
+                    sendChatMessage(transcript);
+                };
+                recognition.onend = () => {
+                    isRecording = false;
+                    document.getElementById('btn-mic').classList.remove('recording');
+                };
+            }
+
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        function showModelModal() {
+            alert("🧠 Modelo de Lenguaje: Qwen3 8B (CPU Ryzen 5 5600X)\n🎙️ Motor de Voz: faster-whisper local (Tiny int8 en CPU)\n🎮 Sunshine: Activo / GPU Radeon RX 6700 XT Libre\n🔒 Privacidad: 100% Local / $0 Costo");
+        }
+
+        async function loadBridgeStatus() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/bridge/status`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const badge = document.getElementById('bridge-status-badge');
+                    const toggleBtn = document.getElementById('btn-toggle-bridge');
+                    const repoDisplay = document.getElementById('bridge-repo-display');
+                    const tasksDisplay = document.getElementById('bridge-tasks-count');
+
+                    if (repoDisplay) repoDisplay.innerText = data.repo_owner ? `${data.repo_owner}/${data.repo_name}` : data.repo_name;
+                    if (tasksDisplay && data.stats) tasksDisplay.innerText = `${data.stats.completed || 0} completadas`;
+
+                    if (data.is_paused) {
+                        if (badge) {
+                            badge.innerText = "⏸️ Pausado";
+                            badge.style.background = "rgba(245, 158, 11, 0.2)";
+                            badge.style.color = "var(--accent-orange)";
+                        }
+                        if (toggleBtn) toggleBtn.innerText = "▶️ Reanudar Bridge";
+                    } else if (data.is_running) {
+                        if (badge) {
+                            badge.innerText = "● Activo (Polling)";
+                            badge.style.background = "rgba(16, 185, 129, 0.2)";
+                            badge.style.color = "#86efac";
+                        }
+                        if (toggleBtn) toggleBtn.innerText = "⏸️ Pausar Bridge";
+                    } else {
+                        if (badge) {
+                            badge.innerText = data.has_token ? "💤 En espera" : "⚠️ Sin Token GitHub";
+                            badge.style.background = "rgba(148, 163, 184, 0.2)";
+                            badge.style.color = "#94a3b8";
+                        }
+                        if (toggleBtn) toggleBtn.innerText = "⏸️ Pausar Bridge";
+                    }
+                }
+            } catch (e) {
+                console.debug("Bridge status poll:", e);
+            }
+        }
+
+        async function toggleBridgePause() {
+            try {
+                const res = await authenticatedFetch(`${API_URL}/api/bridge/toggle`, { method: 'POST' });
+                if (res.ok) {
+                    await loadBridgeStatus();
+                }
+            } catch (e) {
+                alert("Error cambiando estado del Bridge: " + e);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            applyViewMode(currentViewMode);
+            await checkAuth();
+            checkInitialStepupState();
+            setInterval(() => {
+                if (currentCsrfToken || document.getElementById('auth-modal').style.display === 'none') {
+                    fetchHealthAndStatus();
+                    fetchPendingApprovals();
+                    loadBridgeStatus();
+                }
+            }, 6000);
+            setInterval(() => {
+                if (currentCsrfToken || document.getElementById('auth-modal').style.display === 'none') {
+                    fetchActionHistory();
+                }
+            }, 8000);
+
+            // Recuperar mensajes, contador y aprobaciones al reabrir la PWA o desplegar el Galaxy Fold 7
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    loadConversations();
+                    fetchPendingApprovals();
+                }
+            });
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted) {
+                    loadConversations();
+                    fetchPendingApprovals();
+                }
+            });
+
+            // Inicialización de Service Worker y Watchdog de Renderizado
+            initServiceWorker();
+            startDOMWatchdog();
+        });
+
+        async function initServiceWorker() {
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                for (const reg of regs) {
+                    const script = (reg.active || reg.installing || reg.waiting || {}).scriptURL || '';
+                    // Desregistrar workers que no sean /sw.js con scope raíz
+                    if (script && (!script.endsWith('/sw.js') && !script.includes('/sw.js?'))) {
+                        console.log('Purgando Service Worker obsoleto o scope duplicado:', script, reg.scope);
+                        await reg.unregister();
+                    } else {
+                        reg.update().catch(() => {});
+                    }
+                }
+                const mainReg = await navigator.serviceWorker.register('/sw.js?v=9', { scope: '/' });
+                console.log('Yedid PWA Service Worker v9 activo en scope:', mainReg.scope);
+                mainReg.update().catch(() => {});
+            } catch (err) {
+                console.warn('Error inicializando Service Worker:', err);
+            }
+        }
+
+        function startDOMWatchdog() {
+            setTimeout(() => {
+                const container = document.querySelector('.container');
+                const chatInput = document.getElementById('chat-input');
+                const authModal = document.getElementById('auth-modal');
+                const isAuthOpen = authModal && window.getComputedStyle(authModal).display === 'flex';
+
+                if ((!container || container.offsetHeight < 100 || !chatInput || chatInput.offsetParent === null) && !isAuthOpen) {
+                    console.warn("DOM Watchdog: Interfaz colapsada o no visible.");
+                    triggerEmergencyRecovery("La interfaz no se desplegó en tu Galaxy Fold. Toca 'Reparar y Recargar PWA'.");
+                }
+            }, 1800);
+        }
+    </script>
+</body>
+
+</html>
