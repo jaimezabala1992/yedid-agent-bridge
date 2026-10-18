@@ -11,6 +11,7 @@ Persistencia Transaccional de Conversaciones para Yedid Hub v2.0:
   produzca una respuesta redactada clara, con estados y evidencia real en disco.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -89,6 +90,7 @@ class LLMRouter:
     def __init__(self, ollama_url: str = OLLAMA_URL, model: str = OLLAMA_MODEL):
         self.ollama_url = ollama_url
         self.model = model
+        self._inflight_events: Dict[str, asyncio.Event] = {}
 
     def _detect_multiagent_intent(self, text: str) -> Optional[str]:
         """Detecta si el mensaje del usuario está relacionado con agentes locales."""
@@ -286,16 +288,93 @@ class LLMRouter:
 
         return "\n".join(lines) if lines else "He consultado las herramientas solicitadas y actualizado el estado en el panel."
 
+    def _build_deduplicated_response(
+        self,
+        req_state: Dict[str, Any],
+        fallback_conv_id: str
+    ) -> Dict[str, Any]:
+        """Construye la respuesta determinista a partir del estado transaccional de una solicitud duplicada."""
+        target_conv_id = req_state.get("conversation_id") or fallback_conv_id
+        assistant_msg = req_state.get("assistant_message")
+        if assistant_msg and assistant_msg.get("conversation_id"):
+            target_conv_id = assistant_msg["conversation_id"]
+
+        updated_conv = chat_history_db.get_conversation(target_conv_id)
+        associated_task = None
+        tools_executed: List[Dict[str, Any]] = []
+        reply_text = ""
+        resp_msg_id = req_state.get("response_message_id")
+
+        if assistant_msg:
+            reply_text = assistant_msg.get("content") or ""
+            tools_executed = assistant_msg.get("tools_called") or []
+            resp_msg_id = assistant_msg.get("message_id") or resp_msg_id
+            if assistant_msg.get("task_id"):
+                associated_task = task_engine.get_task(assistant_msg["task_id"])
+
+        return {
+            "reply": reply_text,
+            "conversation_id": target_conv_id,
+            "conversation": updated_conv,
+            "tools_executed": tools_executed,
+            "task": associated_task,
+            "deduplicated": True,
+            "request_status": req_state.get("status", "completed"),
+            "request_message_id": req_state.get("user_message_id"),
+            "response_message_id": resp_msg_id,
+            "error": req_state.get("error_detail"),
+        }
+
+    async def _wait_for_inflight_request(
+        self,
+        client_message_id: str,
+        conversation_id: str,
+        timeout_seconds: float = 30.0
+    ) -> Dict[str, Any]:
+        """
+        Espera de manera reactiva a que una solicitud concurrente en estado `'processing'`
+        finalice (en memoria vía asyncio.Event o en SQLite entre procesos) sin re-ejecutar herramientas.
+        """
+        ev = self._inflight_events.get(client_message_id)
+        if ev is not None and timeout_seconds > 0:
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                pass
+        elif timeout_seconds > 0:
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while asyncio.get_running_loop().time() < deadline:
+                state = chat_history_db.get_request_status(client_message_id, conversation_id=conversation_id)
+                if state and state.get("status") != "processing":
+                    return state
+                await asyncio.sleep(0.025)
+
+        state = chat_history_db.get_request_status(client_message_id, conversation_id=conversation_id)
+        if state:
+            return state
+        return {
+            "status": "processing",
+            "client_message_id": client_message_id,
+            "conversation_id": conversation_id,
+            "user_message_id": None,
+            "response_message_id": None,
+            "assistant_message": None,
+            "error_detail": None,
+        }
+
     async def chat(
         self,
         user_message: str,
         conversation_id: Optional[str] = None,
         client_message_id: Optional[str] = None,
         stepup_token: Optional[str] = None,
-        user_id: str = "jaime"
+        user_id: str = "jaime",
+        wait_for_inflight: bool = True,
+        inflight_timeout: float = 30.0
     ) -> Dict[str, Any]:
         """
-        Procesa un turno conversacional con persistencia transaccional y orquestación multiagente.
+        Procesa un turno conversacional con persistencia transaccional, idempotencia completa
+        (processing | completed | failed), vinculación explícita solicitud-respuesta y orquestación multiagente.
         """
         # 1. Asegurar conversación activa persistente
         if not conversation_id:
@@ -306,321 +385,376 @@ class LLMRouter:
             if not conv:
                 conv = chat_history_db.create_conversation(user_id=user_id, conversation_id=conversation_id)
 
-        # 2. Idempotencia y deduplicación determinista por client_message_id
-        if client_message_id and chat_history_db.is_message_duplicate(client_message_id):
-            logger.info(f"[ROUTER] Mensaje duplicado recibido (client_message_id: {client_message_id}). Recuperando respuesta asociada.")
-            assistant_msg = chat_history_db.get_response_for_client_message_id(
+        user_message_id: Optional[str] = None
+        inflight_event: Optional[asyncio.Event] = None
+
+        # 2. Reclamo transaccional de idempotencia por client_message_id
+        if client_message_id:
+            claim = chat_history_db.begin_idempotent_request(
+                conversation_id=conversation_id,
                 client_message_id=client_message_id,
-                conversation_id=conversation_id
+                user_content=user_message,
+                user=user_id
             )
-            if assistant_msg:
-                target_conv_id = assistant_msg.get("conversation_id") or conversation_id
-                updated_conv = chat_history_db.get_conversation(target_conv_id)
-                associated_task = None
-                if assistant_msg.get("task_id"):
-                    associated_task = task_engine.get_task(assistant_msg["task_id"])
-                return {
-                    "reply": assistant_msg["content"],
-                    "conversation_id": target_conv_id,
-                    "conversation": updated_conv,
-                    "tools_executed": assistant_msg.get("tools_called") or [],
-                    "task": associated_task,
-                    "deduplicated": True
-                }
+            if not claim["claimed"]:
+                logger.info(
+                    f"[ROUTER] Solicitud duplicada detectada (client_message_id={client_message_id}, "
+                    f"status={claim['status']}). Evitando re-ejecución."
+                )
+                if claim["status"] == "processing" and wait_for_inflight:
+                    resolved_state = await self._wait_for_inflight_request(
+                        client_message_id=client_message_id,
+                        conversation_id=claim.get("conversation_id") or conversation_id,
+                        timeout_seconds=inflight_timeout
+                    )
+                    return self._build_deduplicated_response(resolved_state, fallback_conv_id=conversation_id)
+                return self._build_deduplicated_response(claim, fallback_conv_id=conversation_id)
 
-        # 3. Guardar mensaje del usuario en la base de datos de chat (idempotente si ya existía sin respuesta)
-        chat_history_db.save_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=user_message,
-            client_message_id=client_message_id
-        )
-
-        async with resource_manager.track_task(self.model):
-            # 4. Inyección efímera de recuerdos personales autorizados (mínimo contexto)
-            from .memory_engine import memory_engine
-            mem_context = memory_engine.get_context_for_llm(
-                user_message,
-                caller_role="local_chat",
-                is_owner_authenticated=True,
-                stepup_token=stepup_token
+            user_message_id = claim["user_message_id"]
+            inflight_event = asyncio.Event()
+            self._inflight_events[client_message_id] = inflight_event
+        else:
+            saved_user = chat_history_db.save_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message,
+                client_message_id=None
             )
+            user_message_id = saved_user["message_id"]
 
-            # 5. Enrutador de Intenciones Multiagente y Enlace con Motor de Tareas
-            agent_intent = self._detect_multiagent_intent(user_message)
-            agent_context = None
-            executed_tools: List[Dict[str, Any]] = []
-            created_task_info: Optional[Dict[str, Any]] = None
+        try:
+            async with resource_manager.track_task(self.model):
+                # 4. Inyección efímera de recuerdos personales autorizados (mínimo contexto)
+                from .memory_engine import memory_engine
+                mem_context = memory_engine.get_context_for_llm(
+                    user_message,
+                    caller_role="local_chat",
+                    is_owner_authenticated=True,
+                    stepup_token=stepup_token
+                )
 
-            if agent_intent:
-                log_event("multiagent_intent_detected", {"intent": agent_intent, "query": user_message})
+                # 5. Enrutador de Intenciones Multiagente y Enlace con Motor de Tareas
+                agent_intent = self._detect_multiagent_intent(user_message)
+                agent_context = None
+                executed_tools: List[Dict[str, Any]] = []
+                created_task_info: Optional[Dict[str, Any]] = None
 
-                if agent_intent == "handover_or_resume":
-                    # Preparar traspaso real y crear la tarea duradera en task_engine (sin duplicar)
-                    handover_res = agent_inspector.prepare_task_handover(
-                        task_query=user_message,
-                        target_agent="gemini_cli",
-                        instructions=(
-                            f"Continuar la tarea solicitada por Jaime ('{user_message[:140]}') "
-                            f"revisando los archivos existentes en disco y generando el entregable de verificación."
-                        ),
-                        conversation_id=conversation_id,
-                        create_durable_task=True
-                    )
-                    executed_tools.append({"tool": "request_task_handover", "result": handover_res})
-                    if handover_res.get("task"):
-                        created_task_info = handover_res["task"]
+                if agent_intent:
+                    log_event("multiagent_intent_detected", {"intent": agent_intent, "query": user_message})
 
-                    agent_context = (
-                        f"[TELEMETRÍA REAL EN DISCO - TRASPASO DE TAREA REGISTRADO]:\n"
-                        f"{json.dumps(handover_res, ensure_ascii=False, indent=2)}\n"
-                        f"Instrucción: Explica a Jaime qué tarea se preparó para traspasar a Gemini CLI, "
-                        f"en qué directorio de proyecto está ({handover_res.get('project_path')}), y que se ha generado la tarea duradera "
-                        f"'{handover_res.get('task_id')}' con solicitud de autorización humana (HITL) "
-                        f"con ID '{handover_res.get('approval_id')}' y riesgo '{handover_res.get('risk_level')}'. "
-                        f"Indícale que en cuanto pulse 'Autorizar y Ejecutar' en la PWA, Gemini comenzará a ejecutarla en segundo plano."
-                    )
-
-                elif agent_intent == "direct_task_execution":
-                    lower_msg = user_message.lower()
-                    target_agent = "safe_script" if ("script" in lower_msg or "sandbox" in lower_msg) else "gemini_cli"
-                    target_path = r"C:\Yedid-Smart-Home\sandbox"
-                    if "codex" in lower_msg or "spss" in lower_msg or "regresion" in lower_msg or "regresión" in lower_msg:
-                        codex_stat = agent_inspector.inspect_codex_status(limit=5)
-                        threads = codex_stat.get("threads", [])
-                        if threads and threads[0].get("cwd"):
-                            target_path = str(threads[0]["cwd"]).replace("\\\\?\\", "")
-                    try:
-                        created_task = task_engine.create_task(
-                            agent=target_agent,
-                            instruction=user_message,
-                            project_path=target_path,
+                    if agent_intent == "handover_or_resume":
+                        handover_res = agent_inspector.prepare_task_handover(
+                            task_query=user_message,
+                            target_agent="gemini_cli",
+                            instructions=(
+                                f"Continuar la tarea solicitada por Jaime ('{user_message[:140]}') "
+                                f"revisando los archivos existentes en disco y generando el entregable de verificación."
+                            ),
                             conversation_id=conversation_id,
-                            risk_level="LOW" if target_agent == "safe_script" else "HIGH",
-                            metadata={"source": "chat_direct_execution"}
+                            create_durable_task=True
                         )
-                        created_task_info = created_task
-                        executed_tools.append({"tool": "execute_agent_task", "result": created_task})
+                        executed_tools.append({"tool": "request_task_handover", "result": handover_res})
+                        if handover_res.get("task"):
+                            created_task_info = handover_res["task"]
+
                         agent_context = (
-                            f"[TAREA DURADERA CREADA EN TASK_ENGINE]:\n"
-                            f"{json.dumps(created_task, ensure_ascii=False, indent=2)}\n"
-                            f"Instrucción: Confirma a Jaime la creación de la tarea '{created_task.get('id')}' con el agente "
-                            f"'{target_agent}' en el directorio '{target_path}', indicando su estado ('{created_task.get('status')}'), "
-                            f"riesgo ('{created_task.get('risk_level')}') e ID de aprobación ('{created_task.get('approval_id')}')."
+                            f"[TELEMETRÍA REAL EN DISCO - TRASPASO DE TAREA REGISTRADO]:\n"
+                            f"{json.dumps(handover_res, ensure_ascii=False, indent=2)}\n"
+                            f"Instrucción: Explica a Jaime qué tarea se preparó para traspasar a Gemini CLI, "
+                            f"en qué directorio de proyecto está ({handover_res.get('project_path')}), y que se ha generado la tarea duradera "
+                            f"'{handover_res.get('task_id')}' con solicitud de autorización humana (HITL) "
+                            f"con ID '{handover_res.get('approval_id')}' y riesgo '{handover_res.get('risk_level')}'. "
+                            f"Indícale que en cuanto pulse 'Autorizar y Ejecutar' en la PWA, Gemini comenzará a ejecutarla en segundo plano."
                         )
-                    except Exception as e:
-                        logger.error(f"Error creando tarea directa desde chat: {e}")
 
+                    elif agent_intent == "direct_task_execution":
+                        lower_msg = user_message.lower()
+                        target_agent = "safe_script" if ("script" in lower_msg or "sandbox" in lower_msg) else "gemini_cli"
+                        target_path = r"C:\Yedid-Smart-Home\sandbox"
+                        if "codex" in lower_msg or "spss" in lower_msg or "regresion" in lower_msg or "regresión" in lower_msg:
+                            codex_stat = agent_inspector.inspect_codex_status(limit=5)
+                            threads = codex_stat.get("threads", [])
+                            if threads and threads[0].get("cwd"):
+                                target_path = str(threads[0]["cwd"]).replace("\\\\?\\", "")
+                        try:
+                            created_task = task_engine.create_task(
+                                agent=target_agent,
+                                instruction=user_message,
+                                project_path=target_path,
+                                conversation_id=conversation_id,
+                                risk_level="LOW" if target_agent == "safe_script" else "HIGH",
+                                metadata={"source": "chat_direct_execution"}
+                            )
+                            created_task_info = created_task
+                            executed_tools.append({"tool": "execute_agent_task", "result": created_task})
+                            agent_context = (
+                                f"[TAREA DURADERA CREADA EN TASK_ENGINE]:\n"
+                                f"{json.dumps(created_task, ensure_ascii=False, indent=2)}\n"
+                                f"Instrucción: Confirma a Jaime la creación de la tarea '{created_task.get('id')}' con el agente "
+                                f"'{target_agent}' en el directorio '{target_path}', indicando su estado ('{created_task.get('status')}'), "
+                                f"riesgo ('{created_task.get('risk_level')}') e ID de aprobación ('{created_task.get('approval_id')}')."
+                            )
+                        except Exception as e:
+                            logger.error(f"Error creando tarea directa desde chat: {e}")
+
+                    else:
+                        codex_stat = agent_inspector.inspect_codex_status(limit=6)
+                        gemini_stat = agent_inspector.inspect_gemini_status(limit=3)
+                        tasks_overview = task_engine.list_tasks(limit=6)
+                        pending_approvals = approval_manager.get_pending()
+
+                        overview_data = {
+                            "codex": {
+                                "is_quota_exhausted": codex_stat.get("is_quota_exhausted", False),
+                                "quota_resets_at": codex_stat.get("active_quota_resets_at"),
+                                "quota_error_message": codex_stat.get("active_quota_message"),
+                                "tasks": codex_stat.get("threads", [])[:4]
+                            },
+                            "gemini_cli": {
+                                "status": gemini_stat.get("status"),
+                                "is_busy": gemini_stat.get("is_busy"),
+                                "active_task": gemini_stat.get("active_task"),
+                                "ready_to_continue_tasks": True,
+                                "capabilities": gemini_stat.get("capabilities", [])
+                            },
+                            "hub_tasks": tasks_overview,
+                            "pending_approvals": pending_approvals
+                        }
+                        executed_tools.append({"tool": "get_agent_tasks", "result": overview_data})
+                        if agent_intent == "agents_overview":
+                            executed_tools.append({"tool": "get_agents_status", "result": agent_inspector.get_all_agents_overview()})
+
+                        agent_context = (
+                            f"[TELEMETRÍA REAL EN DISCO - ESTADO DE AGENTES, TAREAS Y APROBACIONES]:\n"
+                            f"{json.dumps(overview_data, ensure_ascii=False, indent=2)}\n"
+                            f"Instrucción: Usa ÚNICAMENTE estos datos reales para responder a Jaime en español de forma clara y estructurada. "
+                            f"Detalla: 1) Estado de Gemini CLI y Codex Runtime (incluyendo agotamiento de cuota y hora de reinicio "
+                            f"{codex_stat.get('active_quota_resets_at')}), 2) Tareas en Codex y tareas duraderas en el Hub (con sus IDs, "
+                            f"estados y entregables reales), y 3) Aprobaciones humanas pendientes indicando Tarea, Alcance y Riesgo."
+                        )
+
+                # 6. Construir ventana de contexto histórico desde SQLite
+                recent_context = chat_history_db.get_recent_context_for_llm(conversation_id, limit=10)
+                if recent_context and recent_context[-1]["role"] == "user" and recent_context[-1]["content"] == user_message:
+                    history_turns = recent_context[:-1]
                 else:
-                    # Telemetría de estado, tareas de Codex, tareas duraderas del Hub y aprobaciones pendientes
-                    codex_stat = agent_inspector.inspect_codex_status(limit=6)
-                    gemini_stat = agent_inspector.inspect_gemini_status(limit=3)
-                    tasks_overview = task_engine.list_tasks(limit=6)
-                    pending_approvals = approval_manager.get_pending()
+                    history_turns = recent_context
 
-                    overview_data = {
-                        "codex": {
-                            "is_quota_exhausted": codex_stat.get("is_quota_exhausted", False),
-                            "quota_resets_at": codex_stat.get("active_quota_resets_at"),
-                            "quota_error_message": codex_stat.get("active_quota_message"),
-                            "tasks": codex_stat.get("threads", [])[:4]
-                        },
-                        "gemini_cli": {
-                            "status": gemini_stat.get("status"),
-                            "is_busy": gemini_stat.get("is_busy"),
-                            "active_task": gemini_stat.get("active_task"),
-                            "ready_to_continue_tasks": True,
-                            "capabilities": gemini_stat.get("capabilities", [])
-                        },
-                        "hub_tasks": tasks_overview,
-                        "pending_approvals": pending_approvals
+                turn_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                if mem_context:
+                    turn_messages.append({"role": "system", "content": mem_context})
+                if agent_context:
+                    turn_messages.append({"role": "system", "content": agent_context})
+
+                turn_messages.extend(history_turns)
+                turn_messages.append({"role": "user", "content": user_message})
+
+                pre_executed_intent = agent_intent in (
+                    "handover_or_resume", "direct_task_execution", "agents_overview", "gemini_status", "quota_check"
+                )
+
+                payload: Dict[str, Any] = {
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "messages": turn_messages,
+                    "keep_alive": resource_manager.get_current_keep_alive(),
+                    "options": {
+                        "num_predict": 700,
+                        "temperature": 0.25
                     }
-                    executed_tools.append({"tool": "get_agent_tasks", "result": overview_data})
-                    if agent_intent == "agents_overview":
-                        executed_tools.append({"tool": "get_agents_status", "result": agent_inspector.get_all_agents_overview()})
-
-                    agent_context = (
-                        f"[TELEMETRÍA REAL EN DISCO - ESTADO DE AGENTES, TAREAS Y APROBACIONES]:\n"
-                        f"{json.dumps(overview_data, ensure_ascii=False, indent=2)}\n"
-                        f"Instrucción: Usa ÚNICAMENTE estos datos reales para responder a Jaime en español de forma clara y estructurada. "
-                        f"Detalla: 1) Estado de Gemini CLI y Codex Runtime (incluyendo agotamiento de cuota y hora de reinicio "
-                        f"{codex_stat.get('active_quota_resets_at')}), 2) Tareas en Codex y tareas duraderas en el Hub (con sus IDs, "
-                        f"estados y entregables reales), y 3) Aprobaciones humanas pendientes indicando Tarea, Alcance y Riesgo."
-                    )
-
-            # 6. Construir ventana de contexto histórico desde SQLite
-            recent_context = chat_history_db.get_recent_context_for_llm(conversation_id, limit=10)
-            if recent_context and recent_context[-1]["role"] == "user" and recent_context[-1]["content"] == user_message:
-                history_turns = recent_context[:-1]
-            else:
-                history_turns = recent_context
-
-            turn_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            if mem_context:
-                turn_messages.append({"role": "system", "content": mem_context})
-            if agent_context:
-                turn_messages.append({"role": "system", "content": agent_context})
-
-            turn_messages.extend(history_turns)
-            turn_messages.append({"role": "user", "content": user_message})
-
-            # Si el enrutador determinista ya ejecutó las herramientas de agentes en este turno,
-            # pedimos directamente a Ollama que redacte la respuesta ejecutiva sin re-invocar herramientas redundantes.
-            pre_executed_intent = agent_intent in (
-                "handover_or_resume", "direct_task_execution", "agents_overview", "gemini_status", "quota_check"
-            )
-
-            payload: Dict[str, Any] = {
-                "model": self.model,
-                "stream": False,
-                "think": False,
-                "messages": turn_messages,
-                "keep_alive": resource_manager.get_current_keep_alive(),
-                "options": {
-                    "num_predict": 700,
-                    "temperature": 0.25
                 }
-            }
-            if not pre_executed_intent:
-                payload["tools"] = TOOLS_SCHEMA
+                if not pre_executed_intent:
+                    payload["tools"] = TOOLS_SCHEMA
 
-        # 7. Primera llamada a Ollama
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            try:
-                resp = await client.post(f"{self.ollama_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                log_event("llm_error", {"error": str(e)})
-                if executed_tools:
-                    fallback_reply = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
-                else:
-                    fallback_reply = f"No pude comunicarme con el modelo local Ollama ({e}). Asegúrate de que Ollama esté ejecutándose."
-                chat_history_db.save_message(
+            # 7. Primera llamada a Ollama
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                try:
+                    resp = await client.post(f"{self.ollama_url}/api/chat", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as e:
+                    log_event("llm_error", {"error": str(e)})
+                    t_id = created_task_info["id"] if created_task_info else None
+                    if executed_tools:
+                        fallback_reply = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
+                        saved_asst = chat_history_db.complete_idempotent_request(
+                            conversation_id=conversation_id,
+                            user_message_id=user_message_id,
+                            content=fallback_reply,
+                            tools_called=executed_tools,
+                            task_id=t_id,
+                            client_message_id=client_message_id
+                        )
+                        return {
+                            "reply": fallback_reply,
+                            "conversation_id": conversation_id,
+                            "conversation": chat_history_db.get_conversation(conversation_id),
+                            "tools_executed": executed_tools,
+                            "task": created_task_info,
+                            "deduplicated": False,
+                            "request_status": "completed",
+                            "request_message_id": user_message_id,
+                            "response_message_id": saved_asst["message_id"],
+                        }
+                    else:
+                        fallback_reply = f"No pude comunicarme con el modelo local Ollama ({e}). Asegúrate de que Ollama esté ejecutándose."
+                        failed_state = chat_history_db.fail_idempotent_request(
+                            client_message_id=client_message_id,
+                            error_detail=str(e),
+                            conversation_id=conversation_id,
+                            user_message_id=user_message_id,
+                            failure_reply=fallback_reply,
+                            tools_called=executed_tools,
+                            task_id=t_id
+                        )
+                        return {
+                            "reply": fallback_reply,
+                            "conversation_id": conversation_id,
+                            "conversation": chat_history_db.get_conversation(conversation_id),
+                            "tools_executed": executed_tools,
+                            "task": created_task_info,
+                            "deduplicated": False,
+                            "request_status": "failed",
+                            "request_message_id": user_message_id,
+                            "response_message_id": failed_state.get("response_message_id"),
+                            "error": str(e),
+                        }
+
+            msg = data.get("message", {})
+            tool_calls = msg.get("tool_calls")
+            content = _clean_llm_output(msg.get("content", ""))
+
+            # 8. Si el modelo decidió invocar herramientas
+            if tool_calls:
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    tool_name = func.get("name")
+                    raw_args = func.get("arguments", {})
+                    if isinstance(raw_args, str):
+                        try:
+                            args = json.loads(raw_args)
+                        except Exception:
+                            args = {}
+                    else:
+                        args = raw_args or {}
+
+                    result = await execute_tool(tool_name, args, conversation_id=conversation_id)
+                    executed_tools.append(result)
+
+                    if tool_name == "execute_agent_task" and result.get("result"):
+                        created_task_info = result.get("result")
+                    elif tool_name == "request_task_handover" and isinstance(result.get("result"), dict):
+                        created_task_info = result["result"].get("task") or created_task_info
+
+                followup_messages = list(turn_messages)
+                followup_messages.append({
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls
+                })
+                for tc in tool_calls:
+                    t_name = tc.get("function", {}).get("name")
+                    t_res = next((r for r in reversed(executed_tools) if r.get("tool") == t_name), {})
+                    followup_messages.append({
+                        "role": "tool",
+                        "content": json.dumps(t_res.get("result", t_res.get("error", {})), ensure_ascii=False)
+                    })
+
+                followup_messages.append({
+                    "role": "user",
+                    "content": (
+                        "Con base en los resultados anteriores de las herramientas, responde directamente a Jaime en español "
+                        "de forma cordial, clara, ejecutiva y estructurada, incluyendo estados reales, rutas y evidencia en disco."
+                    )
+                })
+
+                followup_payload = {
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "messages": followup_messages,
+                    "keep_alive": resource_manager.get_current_keep_alive(),
+                    "options": {
+                        "num_predict": 700,
+                        "temperature": 0.2
+                    }
+                }
+
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    try:
+                        resp = await client.post(f"{self.ollama_url}/api/chat", json=followup_payload)
+                        resp.raise_for_status()
+                        followup_data = resp.json()
+                        final_reply = _clean_llm_output(followup_data.get("message", {}).get("content", ""))
+                    except Exception as e:
+                        logger.warning(f"Error en segunda llamada al LLM tras herramientas: {e}")
+                        final_reply = ""
+
+                if not final_reply or len(final_reply) < 25:
+                    final_reply = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
+
+                saved_asst = chat_history_db.complete_idempotent_request(
                     conversation_id=conversation_id,
-                    role="assistant",
-                    content=fallback_reply,
+                    user_message_id=user_message_id,
+                    content=final_reply,
                     tools_called=executed_tools,
-                    task_id=created_task_info["id"] if created_task_info else None
+                    task_id=created_task_info["id"] if created_task_info else None,
+                    client_message_id=client_message_id
                 )
                 return {
-                    "reply": fallback_reply,
+                    "reply": final_reply,
                     "conversation_id": conversation_id,
                     "conversation": chat_history_db.get_conversation(conversation_id),
                     "tools_executed": executed_tools,
-                    "task": created_task_info
+                    "task": created_task_info,
+                    "deduplicated": False,
+                    "request_status": "completed",
+                    "request_message_id": user_message_id,
+                    "response_message_id": saved_asst["message_id"],
                 }
 
-        msg = data.get("message", {})
-        tool_calls = msg.get("tool_calls")
-        content = _clean_llm_output(msg.get("content", ""))
+            else:
+                if executed_tools and (not content or len(content) < 25):
+                    content = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
+                elif not content:
+                    content = "Estoy lista. ¿En qué puedo ayudarte hoy, Jaime?"
 
-        # 8. Si el modelo decidió invocar herramientas
-        if tool_calls:
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                tool_name = func.get("name")
-                raw_args = func.get("arguments", {})
-                if isinstance(raw_args, str):
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                else:
-                    args = raw_args or {}
-
-                result = await execute_tool(tool_name, args, conversation_id=conversation_id)
-                executed_tools.append(result)
-
-                if tool_name == "execute_agent_task" and result.get("result"):
-                    created_task_info = result.get("result")
-                elif tool_name == "request_task_handover" and isinstance(result.get("result"), dict):
-                    created_task_info = result["result"].get("task") or created_task_info
-
-            # Segunda llamada al LLM para sintetizar la respuesta
-            followup_messages = list(turn_messages)
-            followup_messages.append({
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls
-            })
-            for tc in tool_calls:
-                t_name = tc.get("function", {}).get("name")
-                t_res = next((r for r in reversed(executed_tools) if r.get("tool") == t_name), {})
-                followup_messages.append({
-                    "role": "tool",
-                    "content": json.dumps(t_res.get("result", t_res.get("error", {})), ensure_ascii=False)
-                })
-
-            followup_messages.append({
-                "role": "user",
-                "content": (
-                    "Con base en los resultados anteriores de las herramientas, responde directamente a Jaime en español "
-                    "de forma cordial, clara, ejecutiva y estructurada, incluyendo estados reales, rutas y evidencia en disco."
+                saved_asst = chat_history_db.complete_idempotent_request(
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    content=content,
+                    tools_called=executed_tools,
+                    task_id=created_task_info["id"] if created_task_info else None,
+                    client_message_id=client_message_id
                 )
-            })
-
-            followup_payload = {
-                "model": self.model,
-                "stream": False,
-                "think": False,
-                "messages": followup_messages,
-                "keep_alive": resource_manager.get_current_keep_alive(),
-                "options": {
-                    "num_predict": 700,
-                    "temperature": 0.2
+                return {
+                    "reply": content,
+                    "conversation_id": conversation_id,
+                    "conversation": chat_history_db.get_conversation(conversation_id),
+                    "tools_executed": executed_tools,
+                    "task": created_task_info,
+                    "deduplicated": False,
+                    "request_status": "completed",
+                    "request_message_id": user_message_id,
+                    "response_message_id": saved_asst["message_id"],
                 }
-            }
-
-            async with httpx.AsyncClient(timeout=45.0) as client:
+        except Exception as exc:
+            if client_message_id:
                 try:
-                    resp = await client.post(f"{self.ollama_url}/api/chat", json=followup_payload)
-                    resp.raise_for_status()
-                    followup_data = resp.json()
-                    final_reply = _clean_llm_output(followup_data.get("message", {}).get("content", ""))
-                except Exception as e:
-                    logger.warning(f"Error en segunda llamada al LLM tras herramientas: {e}")
-                    final_reply = ""
-
-            if not final_reply or len(final_reply) < 25:
-                final_reply = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
-
-            chat_history_db.save_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=final_reply,
-                tools_called=executed_tools,
-                task_id=created_task_info["id"] if created_task_info else None
-            )
-            return {
-                "reply": final_reply,
-                "conversation_id": conversation_id,
-                "conversation": chat_history_db.get_conversation(conversation_id),
-                "tools_executed": executed_tools,
-                "task": created_task_info
-            }
-
-        else:
-            # Respuesta directa (o con telemetría pre-ejecutada)
-            if executed_tools and (not content or len(content) < 25):
-                content = self._synthesize_tool_results_fallback(user_message, executed_tools, created_task_info)
-            elif not content:
-                content = "Estoy lista. ¿En qué puedo ayudarte hoy, Jaime?"
-
-            chat_history_db.save_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=content,
-                tools_called=executed_tools,
-                task_id=created_task_info["id"] if created_task_info else None
-            )
-            return {
-                "reply": content,
-                "conversation_id": conversation_id,
-                "conversation": chat_history_db.get_conversation(conversation_id),
-                "tools_executed": executed_tools,
-                "task": created_task_info
-            }
+                    chat_history_db.fail_idempotent_request(
+                        client_message_id=client_message_id,
+                        error_detail=str(exc),
+                        conversation_id=conversation_id,
+                        user_message_id=user_message_id
+                    )
+                except Exception as db_err:
+                    logger.error(f"Error registrando estado 'failed' en chat_requests: {db_err}")
+            raise
+        finally:
+            if client_message_id and inflight_event is not None:
+                inflight_event.set()
+                self._inflight_events.pop(client_message_id, None)
 
     def reset_conversation(self, conversation_id: Optional[str] = None) -> None:
         """Crea una nueva conversación limpia para reiniciar el hilo de diálogo."""

@@ -1632,8 +1632,8 @@
                     </div>
                     <div style="font-size: 0.66rem; color: var(--text-secondary);">ID Aprobación: <span style="font-family: monospace;">${safeId}</span></div>
                     <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
-                        <button class="btn" style="padding: 5px 10px; font-size: 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" onclick="resolveApproval('${safeId}', 'reject')">❌ Rechazar</button>
-                        <button class="btn btn-center" style="padding: 5px 12px; font-size: 0.75rem;" onclick="resolveApproval('${safeId}', 'approve')">✅ Autorizar y Ejecutar</button>
+                        <button type="button" class="btn" style="padding: 5px 10px; font-size: 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5;" data-action="resolve-approval" data-approval-id="${safeId}" data-decision="reject">❌ Rechazar</button>
+                        <button type="button" class="btn btn-center" style="padding: 5px 12px; font-size: 0.75rem;" data-action="resolve-approval" data-approval-id="${safeId}" data-decision="approve">✅ Autorizar y Ejecutar</button>
                     </div>
                 </div>
             `}).join('');
@@ -1641,7 +1641,7 @@
 
         async function resolveApproval(id, resolution) {
             try {
-                const res = await authenticatedFetch(`${API_URL}/api/approvals/${id}/${resolution}`, {
+                const res = await authenticatedFetch(`${API_URL}/api/approvals/${encodeURIComponent(id)}/${encodeURIComponent(resolution)}`, {
                     method: 'POST'
                 });
                 if (res.ok) {
@@ -1762,7 +1762,7 @@
             if (loadedModels.length > 0) {
                 const m = loadedModels[0];
                 if (ollamaStatus) {
-                    ollamaStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 ${m.name} (${m.size_mb} MB)</span>`;
+                    ollamaStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 ${escapeHtml(m.name)} (${escapeHtml(m.size_mb)} MB)</span>`;
                 }
                 if (ollamaDot) ollamaDot.className = 'dot online';
                 if (ollamaLabel) ollamaLabel.innerText = `${m.name} (${m.size_mb} MB)`;
@@ -1778,8 +1778,8 @@
             const whisperStatus = document.getElementById('whisper-loaded-status');
             if (whisperStatus) {
                 if (data.whisper && data.whisper.is_loaded) {
-                    const idleStr = data.whisper.idle_seconds != null ? ` [inactivo ${data.whisper.idle_seconds}s]` : '';
-                    whisperStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 Activo (${data.whisper.ram_mb} MB)${idleStr}</span>`;
+                    const idleStr = data.whisper.idle_seconds != null ? ` [inactivo ${escapeHtml(data.whisper.idle_seconds)}s]` : '';
+                    whisperStatus.innerHTML = `<span style="color: var(--accent-cyan);">🟢 Activo (${escapeHtml(data.whisper.ram_mb)} MB)${idleStr}</span>`;
                 } else {
                     whisperStatus.innerHTML = `<span style="color: #86efac;">💤 En reposo (0 MB en RAM)</span>`;
                 }
@@ -2092,7 +2092,7 @@
                     const mem = await res.json();
                     document.getElementById('view-mem-id').value = mem.id;
                     document.getElementById('view-mem-id-display').innerText = mem.id;
-                    document.getElementById('view-mem-title').innerHTML = `👁️ ${mem.title || 'Sin Título'}`;
+                    document.getElementById('view-mem-title').textContent = `👁️ ${mem.title || 'Sin Título'}`;
                     document.getElementById('view-mem-category').innerText = mem.category || 'general';
 
                     const badge = document.getElementById('view-mem-level-badge');
@@ -2369,7 +2369,7 @@
 
                 return `
                     <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; gap: 8px; align-items: flex-start;">
-                        <input type="checkbox" class="import-preview-cb" data-index="${idx}" checked onchange="updateImportPreviewCount()" style="margin-top: 3px; cursor: pointer;">
+                        <input type="checkbox" class="import-preview-cb" data-index="${escapeHtml(idx)}" checked style="margin-top: 3px; cursor: pointer;">
                         <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px;">
                                 <strong style="font-size: 0.76rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.title || 'Sin Título')}</strong>
@@ -2537,8 +2537,8 @@
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
                                     <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${escapeHtml(item.category)} • <span style="font-size: 0.6rem; opacity: 0.7;">${escapeHtml(item.origin || '')}</span></span>
                                     <div style="display: flex; gap: 4px;">
-                                        <button class="btn" style="padding: 2px 6px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewSingleMemory('${safeId}', 'discard')">❌ Descartar</button>
-                                        <button class="btn btn-center" style="padding: 2px 6px; font-size: 0.68rem;" onclick="reviewSingleMemory('${safeId}', 'approve')">✅ Aprobar</button>
+                                        <button type="button" class="btn" style="padding: 2px 6px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" data-action="review-single-memory" data-memory-id="${safeId}" data-decision="discard">❌ Descartar</button>
+                                        <button type="button" class="btn btn-center" style="padding: 2px 6px; font-size: 0.68rem;" data-action="review-single-memory" data-memory-id="${safeId}" data-decision="approve">✅ Aprobar</button>
                                     </div>
                                 </div>
                             </div>
@@ -2592,19 +2592,19 @@
                         return `
                             <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 3px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <strong style="font-size: 0.76rem; color: var(--text-primary); cursor: pointer;" onclick="viewMemoryDetail('${safeId}')">${escapeHtml(item.title)}</strong>
+                                    <strong style="font-size: 0.76rem; color: var(--text-primary); cursor: pointer;" data-action="view-memory-detail" data-memory-id="${safeId}">${escapeHtml(item.title)}</strong>
                                     <span style="font-size: 0.62rem; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">${escapeHtml(item.access_level)}</span>
                                 </div>
                                 <div style="font-size: 0.72rem; color: ${isLocked ? 'var(--accent-orange)' : 'var(--text-secondary)'}; line-height: 1.35; white-space: pre-wrap; word-break: break-word;">
                                     ${escapeHtml(item.content)}
-                                    ${isLocked ? ' <button class="btn" style="padding: 1px 5px; font-size: 0.65rem; display: inline-flex;" onclick="openStepupModal()">Desbloquear</button>' : ''}
+                                    ${isLocked ? ' <button type="button" class="btn" style="padding: 1px 5px; font-size: 0.65rem; display: inline-flex;" data-action="open-stepup-modal">Desbloquear</button>' : ''}
                                 </div>
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 3px;">
                                     <span style="font-size: 0.65rem; color: var(--text-secondary);">🏷️ ${escapeHtml(item.category)} • <span style="font-size: 0.6rem; opacity: 0.7;">${safeId}</span></span>
                                     <div style="display: flex; gap: 4px;">
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" onclick="viewMemoryDetail('${safeId}')" title="Consultar detalle completo">👁️ Ver</button>
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem;" onclick="openEditMemoryModal('${safeId}')" title="Editar / Corregir recuerdo">✏️ Editar</button>
-                                        <button class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" onclick="deleteMemory('${safeId}')" title="Eliminar recuerdo definitivamente">🗑️ Borrar</button>
+                                        <button type="button" class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(6,182,212,0.15); color: var(--accent-cyan);" data-action="view-memory-detail" data-memory-id="${safeId}" title="Consultar detalle completo">👁️ Ver</button>
+                                        <button type="button" class="btn" style="padding: 2px 7px; font-size: 0.65rem;" data-action="open-edit-memory" data-memory-id="${safeId}" title="Editar / Corregir recuerdo">✏️ Editar</button>
+                                        <button type="button" class="btn" style="padding: 2px 7px; font-size: 0.65rem; background: rgba(239,68,68,0.15); color: #fca5a5;" data-action="delete-memory" data-memory-id="${safeId}" title="Eliminar recuerdo definitivamente">🗑️ Borrar</button>
                                     </div>
                                 </div>
                             </div>
@@ -2933,8 +2933,8 @@
                     <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed rgba(245, 158, 11, 0.25);">
                         <div style="font-size: 0.64rem; color: var(--accent-orange);">🔒 ID Aprobación: <span style="font-family: monospace;">${safeApprovalId}</span></div>
                         <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 5px;">
-                            <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="resolveApproval('${safeApprovalId}', 'reject')">❌ Rechazar</button>
-                            <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="resolveApproval('${safeApprovalId}', 'approve')">✅ Autorizar y Ejecutar</button>
+                            <button type="button" class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" data-action="resolve-approval" data-approval-id="${safeApprovalId}" data-decision="reject">❌ Rechazar</button>
+                            <button type="button" class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" data-action="resolve-approval" data-approval-id="${safeApprovalId}" data-decision="approve">✅ Autorizar y Ejecutar</button>
                         </div>
                     </div>
                 `;
@@ -2944,7 +2944,7 @@
             if (status === 'interrupted' || status === 'failed') {
                 resumeButtonHtml = `
                     <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px;">
-                        <button class="btn" style="padding: 3px 10px; font-size: 0.68rem; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); cursor: pointer; border-radius: 4px;" onclick="resumeTask('${safeTaskId}')">🔄 Reanudar Tarea</button>
+                        <button type="button" class="btn" style="padding: 3px 10px; font-size: 0.68rem; background: rgba(6, 182, 212, 0.2); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); cursor: pointer; border-radius: 4px;" data-action="resume-task" data-task-id="${safeTaskId}">🔄 Reanudar Tarea</button>
                     </div>
                 `;
             }
@@ -2955,7 +2955,7 @@
             const safeAgent = escapeHtml(task.agent || 'sistema');
 
             return `
-                <div class="chat-task-card" id="task-card-${safeTaskId}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-top: 6px; font-size: 0.72rem;">
+                <div class="chat-task-card" id="task-card-${safeTaskId}" data-task-id="${safeTaskId}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-top: 6px; font-size: 0.72rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; gap: 4px; flex-wrap: wrap;">
                         <strong style="color: var(--accent-cyan); display: flex; align-items: center; gap: 4px;">
                             ⚡ Tarea: <span style="font-family: monospace; font-size: 0.68rem;">${safeTaskId}</span>
@@ -2984,7 +2984,7 @@
         async function resumeTask(taskId) {
             try {
                 showNotification(`Reanudando tarea ${taskId}...`);
-                const res = await authenticatedFetch(`${API_URL}/api/tasks/${taskId}/resume`, { method: 'POST' });
+                const res = await authenticatedFetch(`${API_URL}/api/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
                 if (res.ok) {
                     showNotification(`Tarea reanudada en segundo plano.`);
                     await fetchPendingApprovals();
@@ -3001,6 +3001,13 @@
             }
         }
 
+        async function reviewMemoryFromChat(id, action, btnEl) {
+            await reviewSingleMemory(id, action);
+            if (btnEl && btnEl.parentElement) {
+                btnEl.parentElement.textContent = action === 'approve' ? '✅ Recuerdo aprobado y activado' : '❌ Propuesta descartada';
+            }
+        }
+
         async function loadConversationMessages(convId) {
             const container = document.getElementById('chat-messages');
             if (!container || !convId) return;
@@ -3008,7 +3015,7 @@
             const reqSeq = ++_loadMessagesSeq;
 
             try {
-                const res = await authenticatedFetch(`${API_URL}/api/conversations/${convId}/messages`, { cache: 'no-store' });
+                const res = await authenticatedFetch(`${API_URL}/api/conversations/${encodeURIComponent(convId)}/messages`, { cache: 'no-store' });
                 if (reqSeq !== _loadMessagesSeq) return;
                 if (res.ok) {
                     const data = await res.json();
@@ -3123,8 +3130,8 @@
                                 <div style="margin: 4px 0; color: var(--text-primary); font-weight: 600;">${title}</div>
                                 <div style="font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35; max-height: 60px; overflow-y: auto;">${content}</div>
                                 <div style="display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end;">
-                                    <button class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" onclick="reviewMemoryFromChat('${memId}', 'discard', this)">❌ Descartar</button>
-                                    <button class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" onclick="reviewMemoryFromChat('${memId}', 'approve', this)">✅ Aprobar y Activar</button>
+                                    <button type="button" class="btn" style="padding: 3px 8px; font-size: 0.68rem; background: rgba(239,68,68,0.2); color: #fca5a5;" data-action="review-memory-chat" data-memory-id="${memId}" data-decision="discard">❌ Descartar</button>
+                                    <button type="button" class="btn btn-center" style="padding: 3px 10px; font-size: 0.68rem;" data-action="review-memory-chat" data-memory-id="${memId}" data-decision="approve">✅ Aprobar y Activar</button>
                                 </div>
                             </div>
                         `;
@@ -3437,7 +3444,69 @@
             }
         }
 
+        function initDynamicEventDelegation() {
+            if (window._yedidEventDelegationBound) return;
+            window._yedidEventDelegationBound = true;
+
+            document.addEventListener('click', (event) => {
+                const targetEl = event.target && event.target.closest ? event.target.closest('[data-action]') : null;
+                if (!targetEl) return;
+
+                const action = targetEl.dataset.action;
+                if (action === 'resolve-approval') {
+                    const approvalId = targetEl.dataset.approvalId || '';
+                    const decision = targetEl.dataset.decision || '';
+                    if (approvalId && decision) {
+                        resolveApproval(approvalId, decision);
+                    }
+                } else if (action === 'resume-task') {
+                    const taskId = targetEl.dataset.taskId || '';
+                    if (taskId) {
+                        resumeTask(taskId);
+                    }
+                } else if (action === 'review-single-memory') {
+                    const memoryId = targetEl.dataset.memoryId || '';
+                    const decision = targetEl.dataset.decision || '';
+                    if (memoryId && decision) {
+                        reviewSingleMemory(memoryId, decision);
+                    }
+                } else if (action === 'view-memory-detail') {
+                    const memoryId = targetEl.dataset.memoryId || '';
+                    if (memoryId) {
+                        viewMemoryDetail(memoryId);
+                    }
+                } else if (action === 'open-edit-memory') {
+                    const memoryId = targetEl.dataset.memoryId || '';
+                    if (memoryId) {
+                        openEditMemoryModal(memoryId);
+                    }
+                } else if (action === 'delete-memory') {
+                    const memoryId = targetEl.dataset.memoryId || '';
+                    if (memoryId) {
+                        deleteMemory(memoryId);
+                    }
+                } else if (action === 'open-stepup-modal') {
+                    openStepupModal();
+                } else if (action === 'review-memory-chat') {
+                    const memoryId = targetEl.dataset.memoryId || '';
+                    const decision = targetEl.dataset.decision || '';
+                    if (memoryId && decision) {
+                        reviewMemoryFromChat(memoryId, decision, targetEl);
+                    }
+                }
+            });
+
+            document.addEventListener('change', (event) => {
+                const target = event.target;
+                if (target && target.classList && target.classList.contains('import-preview-cb')) {
+                    updateImportPreviewCount();
+                }
+            });
+        }
+        initDynamicEventDelegation();
+
         window.addEventListener('DOMContentLoaded', async () => {
+            initDynamicEventDelegation();
             applyViewMode(currentViewMode);
             await checkAuth();
             checkInitialStepupState();

@@ -89,6 +89,29 @@ Tras la primera revisión arquitectónica de **ChatGPT (Yedid)** sobre `jaimezab
      - Se añadió verificación temprana `_is_task_cancelled(task_id)` y transición atómica *Compare-And-Set* (`UPDATE tasks SET status = 'running', started_at = ? WHERE id = ? AND status = 'queued'`).
      - Al finalizar el adaptador, el `UPDATE` final incluye `WHERE id = ? AND status != 'cancelled'`. Si la fila ya estaba en `'cancelled'`, se preserva intacto `status = 'cancelled'` y solo se registran los metadatos de cierre (`duration_seconds`, `exit_code`, `stdout`, `stderr`).
 
+### 3.1 Endurecimiento Adicional (Segunda Revisión de ChatGPT — Rama `fix/chatgpt-audit-6-findings`)
+
+En respuesta a las observaciones de la segunda revisión de **ChatGPT (Yedid)** antes de integrar a `main`, se implementaron y verificaron cuatro mejoras estructurales adicionales:
+
+1. **Idempotencia transaccional de extremo a extremo y vinculación explícita (`hub/chat_history_db.py`, `hub/llm_router.py`):**
+   - **Tabla transaccional `chat_requests`:** Registra atómicamente (`BEGIN IMMEDIATE`) cada solicitud con `client_message_id PRIMARY KEY`, `conversation_id`, `user_message_id`, `response_message_id`, `status CHECK(status IN ('processing', 'completed', 'failed'))`, `error_detail`, `created_at` y `updated_at`.
+   - **Vinculación explícita solicitud-respuesta:** La tabla `messages` incorpora `reply_to_message_id` y `request_client_message_id` con índices dedicados (`idx_messages_reply_to`, `idx_messages_req_client_id`). Cada respuesta del asistente queda vinculada por clave primaria al `user_message_id` que la originó, siendo 100% inmune al entrelazamiento de turnos concurrentes en una misma conversación.
+   - **Coordinación de solicitudes en vuelo (`in-flight`):** Si llegan solicitudes duplicadas concurrentes mientras la primera está en `status = 'processing'`, `LLMRouter.chat()` espera su finalización mediante eventos asíncronos (`_inflight_events`) y respaldo en SQLite (`_wait_for_inflight_request`), devolviendo exactamente la misma respuesta sin re-ejecutar herramientas (`execute_tool`) ni duplicar llamadas al LLM.
+
+2. **Protección XSS completa mediante delegación de eventos y pruebas reales en navegador (`hub/static/index.html`, `tests/test_chatgpt_audit_fixes.py`):**
+   - Se eliminaron todos los manejadores inline `onclick="..."` y `onchange="..."` que interpolaban identificadores dinámicos (`${...}`) en `renderApprovalsModal()`, `renderImportPreviewModal()`, `loadPendingMemories()`, `loadActiveMemories()`, `renderTaskCardHtml()` y `appendMessage()`.
+   - Se reemplazaron por atributos de datos inertes (`data-action`, `data-approval-id`, `data-task-id`, `data-memory-id`, `data-decision`) gestionados centralmente por `initDynamicEventDelegation()` mediante `document.addEventListener('click', ...)` y `document.addEventListener('change', ...)`.
+   - Se incorporó `test_04_real_browser_dom_xss_and_event_delegation`, que lanza un navegador Chromium headless real (`--headless --dump-dom`) ejecutando el código JavaScript y DOM real de `hub/static/index.html` contra payloads XSS de ruptura de atributos y scripts.
+
+3. **Aislamiento estricto de bases de datos de producción y CI en GitHub Actions (`hub/config.py`, `hub/*_db.py`, `.github/workflows/ci.yml`):**
+   - Se implementó `assert_not_production_db_in_test()` en `hub/config.py` junto con inicialización perezosa (`_ensure_initialized()`) en `ChatHistoryDB`, `TaskEngine`, `MemoryDB`, `ApprovalManager` y `MultiAgentBus`, impidiendo que la importación de módulos o la ejecución de pruebas toque `C:\Yedid-Smart-Home\data` o `data/`.
+   - La suite `tests/test_chatgpt_audit_fixes.py` verifica además la huella SHA-256 de las bases de datos de producción antes y después de correr las 12 pruebas.
+   - Se añadió `.github/workflows/ci.yml` para ejecutar automáticamente la auditoría de secretos y la suite de pruebas en cada `push` y `pull_request`.
+
+4. **Protección contra eliminación accidental de archivos remotos en `scripts/github_sync.py`:**
+   - `push_to_github_api()` consulta recursivamente el árbol del commit padre en GitHub (`GET /git/trees/{base_tree_sha}?recursive=1`) y compara los archivos remotos con la copia local mediante `inspect_remote_tree_diff()`.
+   - Si algún archivo remoto falta localmente (`missing_locally`), el script identifica los archivos afectados y **aborta el push antes de modificar la rama remota**, exigiendo autorización explícita (`--allow-delete`) o preservación explícita (`--preserve-remote` con `base_tree`).
+
 ---
 
 ## 4. Problemas Conocidos / Limitaciones Actuales

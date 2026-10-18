@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .config import DATA_DIR
+from .config import DATA_DIR, get_data_dir, assert_not_production_db_in_test, is_test_mode
 from .memory_crypto import memory_crypto
 from .audit import log_event
 
@@ -41,21 +41,44 @@ SPANISH_STOPWORDS = {
 }
 
 class MemoryDB:
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
-        self._init_db()
+    def __init__(self, db_path: Optional[Path] = None):
+        self._custom_db_path = db_path
+        self._initialized_path: Optional[Path] = None
+        if db_path is not None:
+            self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Obtiene conexión SQLite con WAL y foreign keys."""
-        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+    @property
+    def db_path(self) -> Path:
+        if self._custom_db_path is not None:
+            return self._custom_db_path
+        return get_data_dir() / "memory.db"
+
+    @db_path.setter
+    def db_path(self, value: Path) -> None:
+        self._custom_db_path = value
+        self._initialized_path = None
+
+    def _open_raw_connection(self) -> sqlite3.Connection:
+        current = self.db_path
+        assert_not_production_db_in_test(current)
+        current.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(current), timeout=10.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         return conn
 
+    def _get_connection(self) -> sqlite3.Connection:
+        """Obtiene conexión SQLite con WAL y foreign keys asegurando inicialización perezosa."""
+        current = self.db_path
+        if self._initialized_path != current:
+            self._init_db()
+        return self._open_raw_connection()
+
     def _init_db(self):
         """Inicializa las tablas y el índice FTS5."""
-        with self._get_connection() as conn:
+        current = self.db_path
+        with self._open_raw_connection() as conn:
             cursor = conn.cursor()
             
             # Tabla principal de recuerdos
@@ -91,19 +114,20 @@ class MemoryDB:
             """)
 
             conn.commit()
+        self._initialized_path = current
 
-        # Restringir permisos de archivo a nivel de Windows
-        try:
-            if os.name == "nt":
-                # Asegurar que solo el usuario actual de Windows tenga acceso
-                import subprocess
-                user = os.environ.get("USERNAME", "jaime")
-                subprocess.run(
-                    f'icacls "{self.db_path}" /inheritance:r /grant:r "{user}:(F)"',
-                    shell=True, capture_output=True, text=True
-                )
-        except Exception as e:
-            logger.warning(f"No se pudieron aplicar ACLs estrictas en SQLite: {e}")
+        # Restringir permisos de archivo a nivel de Windows (omitido en pruebas aisladas para rapidez)
+        if not is_test_mode():
+            try:
+                if os.name == "nt":
+                    import subprocess
+                    user = os.environ.get("USERNAME", "jaime")
+                    subprocess.run(
+                        f'icacls "{current}" /inheritance:r /grant:r "{user}:(F)"',
+                        shell=True, capture_output=True, text=True
+                    )
+            except Exception as e:
+                logger.warning(f"No se pudieron aplicar ACLs estrictas en SQLite: {e}")
 
     def insert_memory(
         self,

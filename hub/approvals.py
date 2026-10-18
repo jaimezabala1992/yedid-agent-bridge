@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from .audit import log_event, redact_sensitive
+from .config import get_data_dir, assert_not_production_db_in_test
 
-APPROVALS_FILE = Path("C:/Yedid-Smart-Home/data/approvals.json")
+APPROVALS_FILE = get_data_dir() / "approvals.json"
 APPROVAL_TIMEOUT_SECONDS = 600  # 10 minutos de validez
 
 def canonical_params_hash(action: str, params: Optional[Dict[str, Any]] = None) -> str:
@@ -23,29 +24,60 @@ def canonical_params_hash(action: str, params: Optional[Dict[str, Any]] = None) 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 class ApprovalManager:
-    def __init__(self, storage_path: Path = APPROVALS_FILE):
-        self.storage_path = storage_path
+    def __init__(self, storage_path: Optional[Path] = None):
+        self._custom_path = storage_path
+        self._loaded_path: Optional[Path] = None
         self._approvals: Dict[str, Dict[str, Any]] = {}
+        if storage_path is not None:
+            self._load()
+
+    @property
+    def storage_path(self) -> Path:
+        if self._custom_path is not None:
+            return self._custom_path
+        return get_data_dir() / "approvals.json"
+
+    @storage_path.setter
+    def storage_path(self, value: Path) -> None:
+        self._custom_path = value
+        self._loaded_path = None
         self._load()
+
+    def _ensure_loaded(self) -> None:
+        current = self.storage_path
+        if self._loaded_path != current:
+            self._load()
 
     def _load(self):
         try:
-            if self.storage_path.exists():
-                data = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            current = self.storage_path
+            assert_not_production_db_in_test(current)
+            self._loaded_path = current
+            if current.exists():
+                data = json.loads(current.read_text(encoding="utf-8"))
                 now = time.time()
                 # Filtrar solicitudes resueltas recientes o no expiradas
                 self._approvals = {
                     k: v for k, v in data.items()
                     if v.get("status") in ("APPROVED", "REJECTED", "CONSUMED") or (now - v.get("created_at", 0) < APPROVAL_TIMEOUT_SECONDS)
                 }
+            else:
+                self._approvals = {}
+        except RuntimeError:
+            raise
         except Exception as e:
             print(f"[APPROVALS ERROR] Error cargando aprobaciones: {e}")
             self._approvals = {}
 
     def _save(self):
         try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            self.storage_path.write_text(json.dumps(self._approvals, indent=2, ensure_ascii=False), encoding="utf-8")
+            current = self.storage_path
+            assert_not_production_db_in_test(current)
+            current.parent.mkdir(parents=True, exist_ok=True)
+            current.write_text(json.dumps(self._approvals, indent=2, ensure_ascii=False), encoding="utf-8")
+            self._loaded_path = current
+        except RuntimeError:
+            raise
         except Exception as e:
             print(f"[APPROVALS ERROR] Error guardando aprobaciones: {e}")
 
@@ -131,13 +163,16 @@ class ApprovalManager:
         self._load()
         now = time.time()
         pending = []
+        dirty = False
         for aid, rec in list(self._approvals.items()):
             if rec.get("status") == "PENDING":
                 if now > rec.get("expires_at", 0):
                     rec["status"] = "EXPIRED"
+                    dirty = True
                 else:
                     pending.append(self._enrich_record(rec))
-        self._save()
+        if dirty:
+            self._save()
         return pending
 
     def get_request(self, approval_id: str) -> Optional[Dict[str, Any]]:

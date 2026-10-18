@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-from .config import AUDIT_LOG_FILE
+from .config import AUDIT_LOG_FILE, get_data_dir, is_test_mode
 
 SENSITIVE_EXACT_KEYS = {
     "token", "auth_token", "password", "secret", "authorization",
@@ -38,6 +38,16 @@ def redact_sensitive(obj: Any) -> Any:
 def log_event(event_type: str, details: Dict[str, Any], caller: str = "local") -> None:
     """Registra una entrada estructurada en audit.jsonl garantizando anonimización de secretos."""
     try:
+        if is_test_mode():
+            target_log = get_data_dir() / "audit.jsonl"
+            # En modo test sin YEDID_DATA_DIR explícito, no escribir al repositorio
+            resolved = str(target_log.resolve()).replace("/", "\\").lower()
+            repo_data = str((Path(__file__).resolve().parent.parent / "data").resolve()).replace("/", "\\").lower()
+            if resolved.startswith(r"c:\yedid-smart-home\data") or resolved.startswith(repo_data):
+                return
+        else:
+            target_log = AUDIT_LOG_FILE
+        target_log.parent.mkdir(parents=True, exist_ok=True)
         sanitized_details = redact_sensitive(details)
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -45,7 +55,7 @@ def log_event(event_type: str, details: Dict[str, Any], caller: str = "local") -
             "caller": caller,
             "details": sanitized_details
         }
-        with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as f:
+        with open(target_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"[AUDIT ERROR] No se pudo escribir registro: {e}")

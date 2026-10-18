@@ -5,8 +5,11 @@ Utilidad de Auditoría de Seguridad Pre-Push y Sincronización con GitHub para Y
 - Verifica que ningún archivo en el repositorio contenga credenciales, tokens, correos personales,
   dominios privados de Tailscale, IPs LAN personales, rutas de usuario local ni bases de datos SQLite.
 - Valida la sintaxis AST de todos los módulos Python antes de permitir un commit o push.
+- Protege los archivos remotos en GitHub: inspecciona el árbol remoto recursivo antes del push,
+  utiliza `base_tree` para no eliminar archivos remotos por accidente cuando falten en la copia local,
+  e identifica cualquier posible eliminación exigiendo autorización explícita (`--allow-delete`).
 - Soporta inicialización Git local (Dulwich) y publicación segura hacia:
-  https://github.com/jaimezabala1992/yedid-agent-bridge (rama main).
+  https://github.com/jaimezabala1992/yedid-agent-bridge.
 """
 
 import argparse
@@ -17,7 +20,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REMOTE_URL = "https://github.com/jaimezabala1992/yedid-agent-bridge.git"
@@ -91,6 +94,69 @@ def run_security_audit(root: Path = REPO_ROOT) -> Tuple[bool, List[str], List[Di
     return (len(violations) == 0), violations, manifest
 
 
+def inspect_remote_tree_diff(
+    remote_blob_paths: Set[str],
+    local_paths: Set[str],
+) -> Dict[str, List[str]]:
+    """
+    Compara el conjunto de rutas de archivos del árbol remoto en GitHub con los archivos locales:
+    - `added_locally`: archivos nuevos presentes en local que no existen en el árbol remoto.
+    - `common_files`: archivos presentes tanto en local como en remoto.
+    - `missing_locally`: archivos que existen en la rama remota pero faltan en la copia local
+      (potenciales eliminaciones que requieren identificación y autorización antes del push).
+    """
+    return {
+        "added_locally": sorted(local_paths - remote_blob_paths),
+        "common_files": sorted(local_paths & remote_blob_paths),
+        "missing_locally": sorted(remote_blob_paths - local_paths),
+    }
+
+
+def build_tree_payload(
+    local_entries: List[Dict[str, Any]],
+    base_tree_sha: Optional[str],
+    missing_locally: List[str],
+    allow_delete: bool = False,
+    preserve_remote_missing: bool = False,
+) -> Dict[str, Any]:
+    """
+    Construye el payload seguro para `POST /repos/{owner}/{repo}/git/trees`:
+    - Si existen archivos remotos ausentes en la copia local (`missing_locally`):
+      * Si no se autorizó explícitamente `--allow-delete` ni `--preserve-remote`, lanza `RuntimeError`
+        detallando los archivos afectados para impedir eliminaciones accidentales.
+      * Si se indicó `--preserve-remote`, conserva los archivos remotos usando `base_tree = base_tree_sha`
+        sin enviar entradas de borrado.
+      * Si se autorizó `--allow-delete`, usa `base_tree = base_tree_sha` y añade entradas explícitas
+        con `"sha": None` únicamente para los archivos cuya eliminación fue autorizada.
+    - Siempre incluye `"base_tree": base_tree_sha` cuando existe un árbol padre para evitar reemplazos
+      destructivos implícitos del árbol Git remoto.
+    """
+    if missing_locally and not allow_delete and not preserve_remote_missing:
+        missing_list_str = "\n".join(f"  - {p}" for p in missing_locally)
+        raise RuntimeError(
+            "Push abortado por protección contra eliminación accidental de archivos remotos.\n"
+            f"Se detectaron {len(missing_locally)} archivo(s) en la rama remota que no existen en la copia local:\n"
+            f"{missing_list_str}\n"
+            "Acción requerida: revisa la lista anterior y ejecuta con '--allow-delete' si autorizas eliminarlos "
+            "del repositorio remoto, o con '--preserve-remote' para conservarlos intactos en GitHub."
+        )
+
+    tree_items: List[Dict[str, Any]] = list(local_entries)
+    if base_tree_sha and allow_delete and missing_locally:
+        for missing_path in missing_locally:
+            tree_items.append({
+                "path": missing_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": None,
+            })
+
+    payload: Dict[str, Any] = {"tree": tree_items}
+    if base_tree_sha:
+        payload["base_tree"] = base_tree_sha
+    return payload
+
+
 def init_and_commit_local_git(
     root: Path = REPO_ROOT,
     message: str = "chore: initial sanitized Yedid Smart Hub v2.0 repository for Gemini & ChatGPT collaboration",
@@ -138,10 +204,14 @@ def push_to_github_api(
     root: Path = REPO_ROOT,
     commit_message: str = "Sync sanitized Yedid Smart Hub v2.0",
     branch: str = DEFAULT_BRANCH,
-) -> Dict[str, str]:
+    allow_delete: bool = False,
+    preserve_remote: bool = False,
+) -> Dict[str, Any]:
     """
     Publica el árbol auditado hacia https://github.com/jaimezabala1992/yedid-agent-bridge en la rama indicada
     utilizando el token de GitHub almacenado en Windows Credential Manager o GITHUB_TOKEN.
+    Antes de crear el nuevo árbol, inspecciona el árbol remoto para identificar cualquier archivo remoto
+    que falte localmente y bloquear eliminaciones no autorizadas.
     """
     import httpx
     prod_root = Path(r"C:\Yedid-Smart-Home")
@@ -194,9 +264,54 @@ def push_to_github_api(
         else:
             parent_sha = ref_res.json()["object"]["sha"]
 
-        # Crear blobs y entradas del árbol Git para todos los archivos auditados
+        # Inspeccionar el árbol remoto actual para detectar archivos remotos ausentes localmente
+        parent_commit_res = client.get(f"{api_base}/git/commits/{parent_sha}")
+        parent_commit_res.raise_for_status()
+        base_tree_sha = parent_commit_res.json()["tree"]["sha"]
+
+        remote_tree_res = client.get(f"{api_base}/git/trees/{base_tree_sha}?recursive=1")
+        remote_tree_res.raise_for_status()
+        oauth_scopes_hdr = remote_tree_res.headers.get("x-oauth-scopes", "")
+        oauth_scopes = {s.strip() for s in oauth_scopes_hdr.split(",") if s.strip()}
+        has_workflow_scope = ("workflow" in oauth_scopes) if oauth_scopes_hdr else True
+
+        remote_tree_data = remote_tree_res.json()
+        remote_blob_paths: Set[str] = {
+            item["path"]
+            for item in remote_tree_data.get("tree", [])
+            if item.get("type") == "blob" and item.get("path")
+        }
+
+        all_repo_files = collect_repo_files(root)
+        skipped_workflow_files: List[str] = []
+        repo_files: List[Path] = []
+        for f in all_repo_files:
+            rel_posix = str(f.relative_to(root)).replace("\\", "/")
+            if rel_posix.startswith(".github/workflows/") and not has_workflow_scope:
+                skipped_workflow_files.append(rel_posix)
+                continue
+            repo_files.append(f)
+
+        local_paths: Set[str] = {
+            str(f.relative_to(root)).replace("\\", "/")
+            for f in repo_files
+        }
+
+        diff_report = inspect_remote_tree_diff(remote_blob_paths, local_paths)
+        missing_locally = diff_report["missing_locally"]
+
+        # Validar política de protección contra borrado remoto ANTES de subir blobs o modificar la rama
+        build_tree_payload(
+            local_entries=[],
+            base_tree_sha=base_tree_sha,
+            missing_locally=missing_locally,
+            allow_delete=allow_delete,
+            preserve_remote_missing=preserve_remote,
+        )
+
+        # Crear blobs y entradas del árbol Git para todos los archivos locales auditados
         tree_entries = []
-        for f in collect_repo_files(root):
+        for f in repo_files:
             rel_posix = str(f.relative_to(root)).replace("\\", "/")
             raw_bytes = f.read_bytes()
             blob_res = client.post(
@@ -215,7 +330,15 @@ def push_to_github_api(
                 "sha": blob_sha,
             })
 
-        tree_res = client.post(f"{api_base}/git/trees", json={"tree": tree_entries})
+        tree_payload = build_tree_payload(
+            local_entries=tree_entries,
+            base_tree_sha=base_tree_sha,
+            missing_locally=missing_locally,
+            allow_delete=allow_delete,
+            preserve_remote_missing=preserve_remote,
+        )
+
+        tree_res = client.post(f"{api_base}/git/trees", json=tree_payload)
         tree_res.raise_for_status()
         tree_sha = tree_res.json()["sha"]
 
@@ -248,18 +371,29 @@ def push_to_github_api(
             "repository": f"{GITHUB_OWNER}/{GITHUB_REPO}",
             "branch": branch,
             "parent_sha": parent_sha,
+            "base_tree_sha": base_tree_sha,
             "commit_sha": new_commit_sha,
             "files_published": str(len(tree_entries)),
+            "added_locally": diff_report["added_locally"],
+            "missing_locally": missing_locally,
+            "deleted_remote_files": missing_locally if allow_delete else [],
+            "skipped_workflow_files": skipped_workflow_files,
             "compare_url": f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/compare/{DEFAULT_BRANCH}...{branch}",
         }
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Auditoría y Sincronización Segura con GitHub para Yedid Smart Hub")
     parser.add_argument("--audit", action="store_true", help="Ejecuta la auditoría de seguridad y sintaxis sobre todos los archivos")
     parser.add_argument("--init-commit", action="store_true", help="Registra el commit en el repositorio Git local")
     parser.add_argument("--set-token", metavar="TOKEN", help="Guarda el Personal Access Token de GitHub en Windows Credential Manager")
     parser.add_argument("--push", action="store_true", help="Publica los archivos auditados hacia GitHub")
+    parser.add_argument("--allow-delete", action="store_true", help="Autoriza explícitamente eliminar en GitHub archivos remotos que ya no existan en la copia local")
+    parser.add_argument("--preserve-remote", action="store_true", help="Conserva en GitHub cualquier archivo remoto que no exista en la copia local usando base_tree")
     parser.add_argument("-b", "--branch", default=DEFAULT_BRANCH, help="Rama de destino en Git local y GitHub (por defecto: main)")
     parser.add_argument("-m", "--message", default="feat: Yedid Smart Hub v2.0 sanitized repository for Gemini & ChatGPT collaboration", help="Mensaje del commit")
     args = parser.parse_args()
@@ -288,10 +422,15 @@ def main():
         print(f"  ✅ Commit Git local registrado en rama '{args.branch}' (Remote: {REMOTE_URL}): {sha}")
 
     if args.push:
-        res = push_to_github_api(REPO_ROOT, commit_message=args.message, branch=args.branch)
+        res = push_to_github_api(
+            REPO_ROOT,
+            commit_message=args.message,
+            branch=args.branch,
+            allow_delete=args.allow_delete,
+            preserve_remote=args.preserve_remote,
+        )
         print(f"  🚀 Push completado exitosamente: {json.dumps(res, ensure_ascii=False)}")
 
 
 if __name__ == "__main__":
     main()
-

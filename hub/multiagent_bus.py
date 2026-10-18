@@ -67,18 +67,36 @@ AGENT_REGISTRY = {
 }
 
 class MultiAgentBus:
-    def __init__(self):
+    def __init__(self, data_file: Optional[Any] = None):
         from pathlib import Path
-        self.data_file = Path("C:/Yedid-Smart-Home/data/multiagent_tasks.json")
-        self._tasks: Dict[str, Dict[str, Any]] = self._load_tasks()
+        from .config import get_data_dir
+        self._custom_file = Path(data_file) if data_file else None
+        self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._loaded = False
+
+    @property
+    def data_file(self):
+        from .config import get_data_dir
+        if self._custom_file is not None:
+            return self._custom_file
+        return get_data_dir() / "multiagent_tasks.json"
+
+    def _ensure_loaded(self) -> None:
+        if not self._loaded:
+            self._tasks = self._load_tasks()
+            self._loaded = True
 
     def _load_tasks(self) -> Dict[str, Dict[str, Any]]:
         """Carga las tareas guardadas desde el archivo persistente."""
         try:
+            from .config import assert_not_production_db_in_test
+            assert_not_production_db_in_test(self.data_file)
             if self.data_file.exists():
                 import json
                 with open(self.data_file, "r", encoding="utf-8") as f:
                     return json.load(f)
+        except RuntimeError:
+            raise
         except Exception:
             pass
         return {}
@@ -87,9 +105,13 @@ class MultiAgentBus:
         """Persiste las tareas en disco."""
         try:
             import json
+            from .config import assert_not_production_db_in_test
+            assert_not_production_db_in_test(self.data_file)
             self.data_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.data_file, "w", encoding="utf-8") as f:
                 json.dump(self._tasks, f, ensure_ascii=False, indent=2)
+        except RuntimeError:
+            raise
         except Exception:
             pass
 

@@ -32,38 +32,61 @@ from .security_policy import (
 )
 from .approvals import approval_manager
 from .chat_history_db import chat_history_db
+from .config import get_data_dir, assert_not_production_db_in_test
 from .process_guard import process_guard
 
 logger = logging.getLogger("yedid_task_engine")
 
-TASKS_DB_FILE = Path("C:/Yedid-Smart-Home/data/agent_tasks.db")
+TASKS_DB_FILE = get_data_dir() / "agent_tasks.db"
 
 
 class TaskEngine:
     """Motor de gestión duradera y ejecución en segundo plano para tareas de agentes locales."""
 
-    def __init__(self, db_path: Path = TASKS_DB_FILE):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Path] = None):
+        self._custom_db_path = db_path
+        self._initialized_path: Optional[Path] = None
         self._worker_task: Optional[asyncio.Task] = None
         self._wake_event = asyncio.Event()
         self._running = False
         self._gemini_adapter = GeminiCLIAdapter()
         self._script_adapter = SafeScriptAdapter()
         self._active_processes: Dict[str, asyncio.subprocess.Process] = {}
-        self._init_db()
+        if db_path is not None:
+            self._init_db()
 
-    def _get_conn(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
+    @property
+    def db_path(self) -> Path:
+        if self._custom_db_path is not None:
+            return self._custom_db_path
+        return get_data_dir() / "agent_tasks.db"
+
+    @db_path.setter
+    def db_path(self, value: Path) -> None:
+        self._custom_db_path = value
+        self._initialized_path = None
+
+    def _open_raw_conn(self) -> sqlite3.Connection:
+        current = self.db_path
+        assert_not_production_db_in_test(current)
+        current.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(current), timeout=15.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         conn.execute("PRAGMA busy_timeout = 5000;")
         return conn
 
+    def _get_conn(self) -> sqlite3.Connection:
+        current = self.db_path
+        if self._initialized_path != current:
+            self._init_db()
+        return self._open_raw_conn()
+
     def _init_db(self) -> None:
         """Crea el esquema relacional e índices si no existen."""
-        with self._get_conn() as conn:
+        current = self.db_path
+        with self._open_raw_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -92,6 +115,7 @@ class TaskEngine:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_approval ON tasks(approval_id);")
             conn.commit()
+        self._initialized_path = current
 
     def reconcile_on_startup(self) -> Dict[str, Any]:
         """

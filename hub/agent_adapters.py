@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,7 +34,13 @@ from .security_policy import (
 logger = logging.getLogger("yedid_adapters")
 
 AGY_EXE = Path(os.getenv("YEDID_AGY_BIN", os.path.expandvars(r"%USERPROFILE%\Documents\Codex\AntigravityCLI\agy.exe")))
-PYTHON_EXE = Path(os.getenv("YEDID_PYTHON_BIN", os.path.expandvars(r"%USERPROFILE%\Documents\Codex\runtime\python\python.exe")))
+_DEFAULT_PYTHON_CANDIDATE = Path(os.path.expandvars(r"%USERPROFILE%\Documents\Codex\runtime\python\python.exe"))
+PYTHON_EXE = Path(
+    os.getenv(
+        "YEDID_PYTHON_BIN",
+        str(_DEFAULT_PYTHON_CANDIDATE if _DEFAULT_PYTHON_CANDIDATE.exists() else Path(sys.executable)),
+    )
+)
 
 
 def is_path_authorized(target_path: Path) -> bool:
